@@ -5,6 +5,7 @@ PynamoDB Connection classes
 
 from typing import Any, Dict, Optional, Sequence
 
+from pynamodb.connection import Connection
 from pynamodb.connection.abstracts import AbstractTableConnection
 from pynamodb.constants import DEFAULT_BILLING_MODE
 from pynamodb.expressions.condition import Condition
@@ -15,6 +16,8 @@ class TableConnection(AbstractTableConnection):
     """
     A higher level abstraction over botocore
     """
+
+    CONNECTION_CLASS = Connection
 
 
     def delete_item(

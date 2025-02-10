@@ -41,12 +41,12 @@ import typing
 
 if typing.TYPE_CHECKING:
     from pynamodb.connection.base import MetaTable
+else:
+    MetaTable = object
 
 T_BotoSession = typing.TypeVar("T_BotoSession")
 
 class AbstractConnection(abc.ABC, typing.Generic[T_BotoSession]):
-    SESSION_FACTORY: typing.Callable[[], T_BotoSession] = get_session
-
     def __init__(
         self,
         region: Optional[str] = None,
@@ -106,6 +106,10 @@ class AbstractConnection(abc.ABC, typing.Generic[T_BotoSession]):
     def __repr__(self) -> str:
         return "Connection<{}>".format(self.client.meta.endpoint_url)
 
+    @staticmethod
+    def session_factory() -> T_BotoSession:
+        return get_session()
+
     @property
     def session(self) -> T_BotoSession:
         """
@@ -113,7 +117,7 @@ class AbstractConnection(abc.ABC, typing.Generic[T_BotoSession]):
         """
         # botocore client creation is not thread safe as of v1.2.5+ (see issue #153)
         if getattr(self._local, 'session', None) is None:
-            self._local.session = self.SESSION_FACTORY()
+            self._local.session = self.session_factory()
             if self._aws_access_key_id and self._aws_secret_access_key:
                 self._local.session.set_credentials(self._aws_access_key_id,
                                                         self._aws_secret_access_key,

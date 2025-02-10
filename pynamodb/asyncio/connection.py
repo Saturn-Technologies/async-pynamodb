@@ -109,7 +109,9 @@ class AsyncPynamoDBContext(AbstractAsyncContextManager):
 
 
 class AsyncConnection(AbstractConnection[aioboto3.Session]):
-    SESSION_FACTORY = aioboto3.Session
+    @staticmethod
+    def session_factory() -> aioboto3.Session:
+        return aioboto3.Session()
 
     async def _make_api_call(
         self, operation_name: str, operation_kwargs: typing.Dict

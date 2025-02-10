@@ -24,6 +24,7 @@ from typing import Union
 from typing import cast
 
 from pynamodb._schema import ModelSchema
+from pynamodb.asyncio.table_connection import AsyncTableConnection
 from pynamodb.connection.base import MetaTable
 
 if sys.version_info >= (3, 8):
@@ -287,6 +288,7 @@ class Model(AttributeContainer, metaclass=MetaModel):
     _hash_keyname: Optional[str] = None
     _range_keyname: Optional[str] = None
     _connection: Optional[TableConnection] = None
+    _async_connection: Optional[AsyncTableConnection] = None
     DoesNotExist: Type[DoesNotExist] = DoesNotExist
     _version_attribute_name: Optional[str] = None
 
@@ -440,12 +442,58 @@ class Model(AttributeContainer, metaclass=MetaModel):
         self.deserialize(item_data)
         return data
 
+    async def async_update(self, actions: List[Action], condition: Optional[Condition] = None, *,
+                           add_version_condition: bool = True) -> Any:
+        """
+        Updates an item using the UpdateItem operation asynchronously.
+
+        :param actions: a list of Action updates to apply
+        :param condition: an optional Condition on which to update
+        :param add_version_condition: For models which have a VersionAttribute,
+          specifies whether only to update if the version matches the model that is currently loaded.
+          Set to `False` for a 'last write wins' strategy.
+          Regardless, the version will always be incremented to prevent "rollbacks" by concurrent calls.
+        :raises ModelInstance.DoesNotExist: if the object to be updated does not exist
+        :raises pynamodb.exceptions.UpdateError: if the `condition` is not met
+        """
+        if not isinstance(actions, list) or len(actions) == 0:
+            raise TypeError("the value of `actions` is expected to be a non-empty list")
+
+        hk_value, rk_value = self._get_hash_range_key_serialized_values()
+        version_condition = self._handle_version_attribute(actions=actions)
+        if add_version_condition and version_condition is not None:
+            condition &= version_condition
+
+        data = await self._async_get_connection().update_item(
+            hk_value,
+            range_key=rk_value,
+            return_values=ALL_NEW,
+            condition=condition,
+            actions=actions
+        )
+
+        item_data = data[ATTRIBUTES]
+        stored_cls = self._get_discriminator_class(item_data)
+        if stored_cls and stored_cls != type(self):
+            raise ValueError("Cannot update this item from the returned class: {}".format(stored_cls.__name__))
+        self.deserialize(item_data)
+        return data
+
     def save(self, condition: Optional[Condition] = None, *, add_version_condition: bool = True) -> Dict[str, Any]:
         """
         Save this object to dynamodb
         """
         args, kwargs = self._get_save_args(condition=condition, add_version_condition=add_version_condition)
         data = self._get_connection().put_item(*args, **kwargs)
+        self.update_local_version_attribute()
+        return data
+
+    async def async_save(self, condition: Optional[Condition] = None, *, add_version_condition: bool = True) -> Dict[str, Any]:
+        """
+        Save this object to dynamodb
+        """
+        args, kwargs = self._get_save_args(condition=condition, add_version_condition=add_version_condition)
+        data = await self._async_get_connection().put_item(*args, **kwargs)
         self.update_local_version_attribute()
         return data
 
@@ -466,6 +514,31 @@ class Model(AttributeContainer, metaclass=MetaModel):
         if stored_cls and stored_cls != type(self):
             raise ValueError("Cannot refresh this item from the returned class: {}".format(stored_cls.__name__))
         self.deserialize(item_data)
+
+    async def async_refresh(self, consistent_read: bool = False) -> None:
+        """
+        Retrieves this object's data from DynamoDB and syncs this local object asynchronously
+
+        :param consistent_read: If True, then a consistent read is performed.
+        :raises ModelInstance.DoesNotExist: if the object to be updated does not exist
+        """
+        hk_value, rk_value = self._get_hash_range_key_serialized_values()
+        attrs = await self._async_get_connection().get_item(
+            hk_value,
+            range_key=rk_value,
+            consistent_read=consistent_read
+        )
+
+        item_data = attrs.get(ITEM, None)
+        if item_data is None:
+            raise self.DoesNotExist("This item does not exist in the table.")
+
+        stored_cls = self._get_discriminator_class(item_data)
+        if stored_cls and stored_cls != type(self):
+            raise ValueError("Cannot refresh this item from the returned class: {}".format(stored_cls.__name__))
+
+        self.deserialize(item_data)
+
 
     def get_update_kwargs_from_instance(
         self,
@@ -554,6 +627,28 @@ class Model(AttributeContainer, metaclass=MetaModel):
         raise cls.DoesNotExist()
 
     @classmethod
+    async def async_get(
+        cls: Type[_T],
+        hash_key: _KeyType,
+        range_key: Optional[_KeyType] = None,
+        consistent_read: bool = False,
+        attributes_to_get: Optional[Sequence[Text]] = None,
+    ) -> _T:
+        hash_key, range_key = cls._serialize_keys(hash_key, range_key)
+        data = await cls._async_get_connection().get_item(
+            hash_key,
+            range_key=range_key,
+            consistent_read=consistent_read,
+            attributes_to_get=attributes_to_get,
+        )
+        if data:
+            item_data = data.get(ITEM)
+            if item_data:
+                return cls.from_raw_data(item_data)
+        raise cls.DoesNotExist()
+
+
+    @classmethod
     def from_raw_data(cls: Type[_T], data: Dict[str, Any]) -> _T:
         """
         Returns an instance of this class
@@ -624,6 +719,7 @@ class Model(AttributeContainer, metaclass=MetaModel):
         list(result_iterator)
 
         return result_iterator.total_count
+
 
     @classmethod
     def query(
@@ -1082,6 +1178,61 @@ class Model(AttributeContainer, metaclass=MetaModel):
                                               aws_secret_access_key=cls.Meta.aws_secret_access_key,
                                               aws_session_token=cls.Meta.aws_session_token)
         return cls._connection
+
+    @classmethod
+    def _async_get_connection(cls) -> AsyncTableConnection:
+        if not hasattr(cls, "Meta"):
+            raise AttributeError(
+                'As of v1.0 PynamoDB Models require a `Meta` class.\n'
+                'Model: {}.{}\n'
+                'See https://pynamodb.readthedocs.io/en/latest/release_notes.html\n'.format(
+                    cls.__module__, cls.__name__,
+                ),
+            )
+        elif not hasattr(cls.Meta, "table_name") or cls.Meta.table_name is None:
+            raise AttributeError(
+                'As of v1.0 PynamoDB Models must have a table_name\n'
+                'Model: {}.{}\n'
+                'See https://pynamodb.readthedocs.io/en/latest/release_notes.html'.format(
+                    cls.__module__, cls.__name__,
+                ),
+            )
+        # For now we just check that the connection exists and (in the case of model inheritance)
+        # points to the same table. In the future we should update the connection if any of the attributes differ.
+        if cls._async_connection is None or cls._async_connection.table_name != cls.Meta.table_name:
+            schema = cls._get_schema()
+            meta_table = MetaTable({
+                constants.TABLE_NAME: cls.Meta.table_name,
+                constants.KEY_SCHEMA: schema['key_schema'],
+                constants.ATTR_DEFINITIONS: schema['attribute_definitions'],
+                constants.GLOBAL_SECONDARY_INDEXES: [
+                    {
+                        constants.INDEX_NAME: index_schema['index_name'],
+                        constants.KEY_SCHEMA: index_schema['key_schema'],
+                    }
+                    for index_schema in schema['global_secondary_indexes']
+                ],
+                constants.LOCAL_SECONDARY_INDEXES: [
+                    {
+                        constants.INDEX_NAME: index_schema['index_name'],
+                        constants.KEY_SCHEMA: index_schema['key_schema'],
+                    }
+                    for index_schema in schema['local_secondary_indexes']
+                ],
+            })
+            cls._async_connection = AsyncTableConnection(cls.Meta.table_name,
+                                              meta_table=meta_table,
+                                              region=cls.Meta.region,
+                                              host=cls.Meta.host,
+                                              connect_timeout_seconds=cls.Meta.connect_timeout_seconds,
+                                              read_timeout_seconds=cls.Meta.read_timeout_seconds,
+                                              max_retry_attempts=cls.Meta.max_retry_attempts,
+                                              max_pool_connections=cls.Meta.max_pool_connections,
+                                              extra_headers=cls.Meta.extra_headers,
+                                              aws_access_key_id=cls.Meta.aws_access_key_id,
+                                              aws_secret_access_key=cls.Meta.aws_secret_access_key,
+                                              aws_session_token=cls.Meta.aws_session_token)
+        return cls._async_connection
 
 
     @classmethod
