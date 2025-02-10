@@ -197,3 +197,9 @@ class AsyncTableConnection(AbstractTableConnection):
             scan_index_forward=scan_index_forward,
             select=select,
         )
+
+    async def describe_table(self) -> Dict:
+        """
+        Performs the DescribeTable operation and returns the result
+        """
+        return await self.connection.describe_table(self.table_name)

@@ -24,6 +24,7 @@ from typing import Union
 from typing import cast
 
 from pynamodb._schema import ModelSchema
+from pynamodb.asyncio.result_iterator import AsyncResultIterator
 from pynamodb.asyncio.table_connection import AsyncTableConnection
 from pynamodb.connection.base import MetaTable
 
@@ -720,6 +721,65 @@ class Model(AttributeContainer, metaclass=MetaModel):
 
         return result_iterator.total_count
 
+    @classmethod
+    async def async_count(
+        cls: Type[_T],
+        hash_key: Optional[_KeyType] = None,
+        range_key_condition: Optional[Condition] = None,
+        filter_condition: Optional[Condition] = None,
+        consistent_read: bool = False,
+        index_name: Optional[str] = None,
+        limit: Optional[int] = None,
+        rate_limit: Optional[float] = None,
+    ) -> int:
+        """
+        Provides a filtered count asynchronously
+
+        :param hash_key: The hash key to query. Can be None.
+        :param range_key_condition: Condition for range key
+        :param filter_condition: Condition used to restrict the query results
+        :param consistent_read: If True, a consistent read is performed
+        :param index_name: If set, then this index is used
+        :param rate_limit: If set then consumed capacity will be limited to this amount per second
+        """
+        if hash_key is None:
+            if filter_condition is not None:
+                raise ValueError('A hash_key must be given to use filters')
+            return (await cls._async_get_connection().describe_table()).get(ITEM_COUNT)
+
+        if index_name:
+            hash_key = cls._indexes[index_name]._hash_key_attribute().serialize(hash_key)
+        else:
+            hash_key = cls._serialize_keys(hash_key)[0]
+
+        # If this class has a discriminator attribute, filter the query to only return instances of this class.
+        discriminator_attr = cls._get_discriminator_attribute()
+        if discriminator_attr:
+            filter_condition &= discriminator_attr.is_in(*discriminator_attr.get_registered_subclasses(cls))
+
+        query_args = (hash_key,)
+        query_kwargs = dict(
+            range_key_condition=range_key_condition,
+            filter_condition=filter_condition,
+            index_name=index_name,
+            consistent_read=consistent_read,
+            limit=limit,
+            select=COUNT
+        )
+
+        result_iterator: AsyncResultIterator[_T] = AsyncResultIterator(
+            cls._async_get_connection().query,
+            query_args,
+            query_kwargs,
+            limit=limit,
+            rate_limit=rate_limit,
+        )
+
+        # iterate through results
+        async for _ in result_iterator:
+            pass
+
+        return result_iterator.total_count
 
     @classmethod
     def query(

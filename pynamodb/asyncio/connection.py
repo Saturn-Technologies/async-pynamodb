@@ -9,10 +9,10 @@ import aioboto3
 import asyncio
 import types_aiobotocore_dynamodb
 from aiobotocore.config import AioConfig
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, BotoCoreError
 
 from pynamodb.connection.abstracts import AbstractConnection
-from pynamodb.connection.base import BOTOCORE_EXCEPTIONS
+from pynamodb.connection.base import BOTOCORE_EXCEPTIONS, MetaTable
 from pynamodb.constants import (
     SERVICE_NAME,
     DELETE_ITEM,
@@ -59,6 +59,7 @@ from pynamodb.constants import (
     TOTAL,
     CONSUMED_CAPACITY,
     CAPACITY_UNITS,
+    TABLE_KEY,
 )
 from pynamodb.exceptions import (
     DeleteError,
@@ -71,6 +72,7 @@ from pynamodb.exceptions import (
     QueryError,
     VerboseClientError,
     CancellationReason,
+    TableDoesNotExist,
 )
 from pynamodb.expressions.condition import Condition
 from pynamodb.expressions.operand import Path
@@ -632,3 +634,26 @@ class AsyncConnection(AbstractConnection[aioboto3.Session]):
             return await self.dispatch(QUERY, operation_kwargs)
         except BOTOCORE_EXCEPTIONS as e:
             raise QueryError("Failed to query items: {}".format(e), e)
+
+    async def describe_table(self, table_name: str) -> typing.Dict:
+        """
+        Performs the DescribeTable operation
+        """
+        operation_kwargs = {TABLE_NAME: table_name}
+        try:
+            data = await self.dispatch(DESCRIBE_TABLE, operation_kwargs)
+            table_data = data.get(TABLE_KEY)
+            # For compatibility with existing code which uses Connection directly,
+            # we can let DescribeTable set the meta table.
+            if table_data:
+                meta_table = MetaTable(table_data)
+                if meta_table.table_name not in self._tables:
+                    self.add_meta_table(meta_table)
+            return typing.cast(typing.Dict, table_data)
+        except BotoCoreError as e:
+            raise TableError("Unable to describe table: {}".format(e), e)
+        except ClientError as e:
+            if "ResourceNotFound" in e.response["Error"]["Code"]:
+                raise TableDoesNotExist(e.response["Error"]["Message"])
+            else:
+                raise
