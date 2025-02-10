@@ -32,7 +32,7 @@ jobs:
         key: venv-${{ hashFiles('poetry.lock') }}
 
     - name: Install the project dependencies
-      run: poetry install -n --all-extras --with tests --with dev
+      run: poetry install -n --all-extras --with test --with dev
 
     - name: Run dynamodb_local
       run: |
