@@ -7,7 +7,7 @@ import warnings
 import sys
 from copy import deepcopy
 from inspect import getmembers
-from typing import Any
+from typing import Any, AsyncIterator
 from typing import Dict
 from typing import Generic
 from typing import Iterable
@@ -22,6 +22,11 @@ from typing import Type
 from typing import TypeVar
 from typing import Union
 from typing import cast
+
+import asyncio
+
+from aioitertools.asyncio import as_completed
+from more_itertools import ichunked
 
 from pynamodb._schema import ModelSchema
 from pynamodb.asyncio.result_iterator import AsyncResultIterator
@@ -382,6 +387,120 @@ class Model(AttributeContainer, metaclass=MetaModel):
                 keys_to_get = unprocessed_keys
             else:
                 keys_to_get = []
+
+    @classmethod
+    def _batch_serialize_keys(
+        cls, items: Iterable[Union[_KeyType, Iterable[_KeyType]]]
+    ) -> Iterator[Dict[str, Any]]:
+        """Serialize a collection of keys for batch operations.
+
+        Args:
+            items: Collection of primary keys or key pairs. For tables with composite keys,
+                  each item should be an iterable of (hash_key, range_key)
+
+        Returns:
+            Iterator of serialized key dictionaries
+
+        Raises:
+            ValueError: If key format is invalid for the table schema
+
+        Example:
+            ```python
+            # For a table with only hash key
+            keys = ["id1", "id2", "id3"]
+
+            # For a table with hash and range key
+            keys = [("id1", "sort1"), ("id2", "sort2")]
+            ```
+        """
+        hash_key_attribute = cls._hash_key_attribute()
+        range_key_attribute = cls._range_key_attribute()
+
+        for item in items:
+            if range_key_attribute:
+                if isinstance(item, str):
+                    raise ValueError(
+                        f"Invalid key value {item!r}: "
+                        "expected non-str iterable with exactly 2 elements (hash_key, range_key)"
+                    )
+                try:
+                    hash_key, range_key = item
+                except (TypeError, ValueError):
+                    raise ValueError(
+                        f"Invalid key value {item!r}: "
+                        "expected iterable with exactly 2 elements (hash_key, range_key)"
+                    )
+                hash_key_ser, range_key_ser = cls._serialize_keys(
+                    hash_key, range_key
+                )
+                yield {
+                    hash_key_attribute.attr_name: hash_key_ser,
+                    range_key_attribute.attr_name: range_key_ser,
+                }
+            else:
+                hash_key_ser, _ = cls._serialize_keys(item)
+                yield {hash_key_attribute.attr_name: hash_key_ser}
+
+    @classmethod
+    async def async_batch_get(
+        cls: Type[_T],
+        items: Iterable[Union[_KeyType, Iterable[_KeyType]]],
+        consistent_read: Optional[bool] = None,
+        attributes_to_get: Optional[Sequence[str]] = None,
+    ) -> AsyncIterator[_T]:
+        """Retrieve multiple items from DynamoDB in batches.
+
+        This method handles pagination and retries for unprocessed items automatically.
+        It yields items as they are retrieved, making it memory efficient for large datasets.
+
+        Args:
+            items: Collection of keys to retrieve. For tables with composite keys,
+                  each item should be an iterable of (hash_key, range_key)
+            consistent_read: Whether to use strongly consistent reads
+            attributes_to_get: Optional list of specific attributes to retrieve
+
+        Yields:
+            Model instances for each retrieved item
+
+        Raises:
+            GetError: If the batch get operation fails
+
+        Example:
+            ```python
+            # For a table with only hash key
+            keys = ["id1", "id2", "id3"]
+            async for item in wrapper.batch_get(keys):
+                process_item(item)
+
+            # For a table with hash and range key
+            keys = [("id1", "sort1"), ("id2", "sort2")]
+            async for item in wrapper.batch_get(keys):
+                process_item(item)
+            ```
+        """
+        unprocessed_batch_items = list(items)
+
+        while unprocessed_batch_items:
+            to_process: List[Dict[str, Any]] = []
+
+            # Create tasks for each chunk of keys
+            tasks = [
+                cls._async_batch_get_item(chunk, consistent_read, attributes_to_get)
+                for chunk in ichunked(
+                    cls._batch_serialize_keys(unprocessed_batch_items),
+                    BATCH_GET_PAGE_LIMIT,
+                )
+            ]
+
+            # Process completed tasks
+            async for items, unprocessed_items in as_completed(tasks):
+                to_process.extend(unprocessed_items or [])
+                for item in items:
+                    yield cls.from_raw_data(item)
+
+            unprocessed_batch_items = to_process
+            # Small delay to prevent tight loops
+            await asyncio.sleep(0)
 
     @classmethod
     def batch_write(cls: Type[_T], auto_commit: bool = True) -> BatchWrite[_T]:
@@ -1299,6 +1418,15 @@ class Model(AttributeContainer, metaclass=MetaModel):
         """
         log.debug("Fetching a BatchGetItem page")
         data = cls._get_connection().batch_get_item(
+            keys_to_get, consistent_read=consistent_read, attributes_to_get=attributes_to_get,
+        )
+        item_data = data.get(RESPONSES).get(cls.Meta.table_name)  # type: ignore
+        unprocessed_items = data.get(UNPROCESSED_KEYS).get(cls.Meta.table_name, {}).get(KEYS, None)  # type: ignore
+        return item_data, unprocessed_items
+
+    @classmethod
+    async def _async_batch_get_item(cls, keys_to_get, consistent_read, attributes_to_get):
+        data = await cls._async_get_connection().batch_get_item(
             keys_to_get, consistent_read=consistent_read, attributes_to_get=attributes_to_get,
         )
         item_data = data.get(RESPONSES).get(cls.Meta.table_name)  # type: ignore
