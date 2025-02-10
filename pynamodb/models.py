@@ -1,7 +1,6 @@
 """
 DynamoDB Models for PynamoDB
 """
-import random
 import time
 import logging
 import warnings

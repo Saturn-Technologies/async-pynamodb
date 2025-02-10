@@ -3,86 +3,19 @@ PynamoDB Connection classes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 """
 
-from typing import Any, Dict, Mapping, Optional, Sequence
+from typing import Any, Dict, Optional, Sequence
 
-from pynamodb.connection.base import Connection, MetaTable
-from pynamodb.constants import DEFAULT_BILLING_MODE, KEY
+from pynamodb.connection.abstracts import AbstractTableConnection
+from pynamodb.constants import DEFAULT_BILLING_MODE
 from pynamodb.expressions.condition import Condition
 from pynamodb.expressions.update import Action
 
 
-class TableConnection:
+class TableConnection(AbstractTableConnection):
     """
     A higher level abstraction over botocore
     """
 
-    def __init__(
-        self,
-        table_name: str,
-        region: Optional[str] = None,
-        host: Optional[str] = None,
-        connect_timeout_seconds: Optional[float] = None,
-        read_timeout_seconds: Optional[float] = None,
-        max_retry_attempts: Optional[int] = None,
-        max_pool_connections: Optional[int] = None,
-        extra_headers: Optional[Mapping[str, str]] = None,
-        aws_access_key_id: Optional[str] = None,
-        aws_secret_access_key: Optional[str] = None,
-        aws_session_token: Optional[str] = None,
-        *,
-        meta_table: Optional[MetaTable] = None,
-    ) -> None:
-        self.table_name = table_name
-        self.connection = Connection(region=region,
-                                     host=host,
-                                     connect_timeout_seconds=connect_timeout_seconds,
-                                     read_timeout_seconds=read_timeout_seconds,
-                                     max_retry_attempts=max_retry_attempts,
-                                     max_pool_connections=max_pool_connections,
-                                     extra_headers=extra_headers,
-                                     aws_access_key_id=aws_access_key_id,
-                                     aws_secret_access_key=aws_secret_access_key,
-                                     aws_session_token=aws_session_token)
-
-        if meta_table is not None:
-            self.connection.add_meta_table(meta_table)
-
-    def get_meta_table(self) -> MetaTable:
-        """
-        Returns a MetaTable
-        """
-        return self.connection.get_meta_table(self.table_name)
-
-    def get_operation_kwargs(
-        self,
-        hash_key: str,
-        range_key: Optional[str] = None,
-        key: str = KEY,
-        attributes: Optional[Any] = None,
-        attributes_to_get: Optional[Any] = None,
-        actions: Optional[Sequence[Action]] = None,
-        condition: Optional[Condition] = None,
-        consistent_read: Optional[bool] = None,
-        return_values: Optional[str] = None,
-        return_consumed_capacity: Optional[str] = None,
-        return_item_collection_metrics: Optional[str] = None,
-        return_values_on_condition_failure: Optional[str] = None,
-    ) -> Dict:
-        return self.connection.get_operation_kwargs(
-            self.table_name,
-            hash_key,
-            range_key=range_key,
-            key=key,
-            attributes=attributes,
-            attributes_to_get=attributes_to_get,
-            actions=actions,
-            condition=condition,
-            consistent_read=consistent_read,
-            return_values=return_values,
-            return_consumed_capacity=return_consumed_capacity,
-            return_item_collection_metrics=return_item_collection_metrics,
-            return_values_on_condition_failure=return_values_on_condition_failure
-        )
 
     def delete_item(
         self,

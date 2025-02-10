@@ -1,4 +1,4 @@
-from typing import Tuple, TypeVar, Type, Any, List, Optional, Dict, Union, Text, Generic
+from typing import TypeVar, Type, Any, List, Optional, Dict
 
 from pynamodb.connection import Connection
 from pynamodb.constants import ITEM, RESPONSES

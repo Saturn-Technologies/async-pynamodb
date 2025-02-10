@@ -12,7 +12,7 @@ from botocore.exceptions import BotoCoreError
 from botocore.session import get_session
 
 from pynamodb.connection._botocore_private import BotocoreBaseClientPrivate
-from pynamodb.connection.skeleton import ConnectionSkeleton
+from pynamodb.connection.abstracts import AbstractConnection
 from pynamodb.constants import (
     RETURN_CONSUMED_CAPACITY, EXCLUSIVE_START_KEY, SCAN_INDEX_FORWARD, ATTR_DEFINITIONS,
     BATCH_WRITE_ITEM, CONSISTENT_READ, DESCRIBE_TABLE, KEY_CONDITION_EXPRESSION,
@@ -228,7 +228,7 @@ class MetaTable(object):
             }
 
 
-class Connection(ConnectionSkeleton):
+class Connection(AbstractConnection):
     """
     A higher level abstraction over botocore
     """
