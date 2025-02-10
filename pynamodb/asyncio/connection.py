@@ -256,7 +256,7 @@ class AsyncConnection(AbstractConnection[aioboto3.Session]):
             "TransactGet is not supported in AsyncConnection yet."
         )
 
-    async def batch_write(
+    async def batch_write_item(
         self,
         table_name: str,
         put_items: typing.Optional[
