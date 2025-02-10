@@ -29,6 +29,7 @@ from aioitertools.asyncio import as_completed
 from more_itertools import ichunked
 
 from pynamodb._schema import ModelSchema
+from pynamodb.asyncio.batch_write import AsyncBatchWrite
 from pynamodb.asyncio.result_iterator import AsyncResultIterator
 from pynamodb.asyncio.table_connection import AsyncTableConnection
 from pynamodb.connection.base import MetaTable
@@ -514,6 +515,11 @@ class Model(AttributeContainer, metaclass=MetaModel):
                             (whether successful or not).
         """
         return BatchWrite(cls, auto_commit=auto_commit)
+
+    @classmethod
+    def async_batch_write(cls: Type[_T], auto_commit: bool = True) -> AsyncBatchWrite[_T]:
+        return AsyncBatchWrite(cls, auto_commit=auto_commit)
+
 
     def delete(self, condition: Optional[Condition] = None, *, add_version_condition: bool = True) -> Any:
         """

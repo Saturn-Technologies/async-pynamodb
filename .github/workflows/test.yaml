@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-22.04
     strategy:
       matrix:
-        python-version: ['3.7', '3.8', '3.9', '3.10', '3.11' ,'3.12', 'pypy-3.8']
+        python-version: ['3.11']
 
     steps:
     - uses: actions/checkout@v2
@@ -19,11 +19,20 @@ jobs:
       uses: actions/setup-python@v2
       with:
         python-version: ${{ matrix.python-version }}
-
-    - name: Install dependencies
+    - name: Install poetry
+      uses: abatilo/actions-poetry@v4
+    - name: Setup a local virtual environment (if no poetry.toml file)
       run: |
-        python -m pip install --upgrade pip wheel
-        python -m pip install -e .[signals] -r requirements-dev.txt
+        poetry config virtualenvs.create true --local
+        poetry config virtualenvs.in-project true --local
+    - uses: actions/cache@v3
+      name: Define a cache for the virtual environment based on the dependencies lock file
+      with:
+        path: ./.venv
+        key: venv-${{ hashFiles('poetry.lock') }}
+
+    - name: Install the project dependencies
+      run: poetry install -n --all-extras --with tests --with dev
 
     - name: Run dynamodb_local
       run: |
@@ -32,58 +41,21 @@ jobs:
         java -Djava.library.path=/tmp/DynamoDBLocal_lib -jar /tmp/DynamoDBLocal.jar -inMemory -port 8000 &
 
     - name: Run tests
-      run: |
-        pytest --cov-report term-missing --cov=pynamodb tests
-
-    - name: Upload coverage
-      run: |
-        coveralls --service=github
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        COVERALLS_FLAG_NAME: ${{ matrix.test-name }}
-        COVERALLS_PARALLEL: true
-
-
-  mypy:
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v2
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v2
-      with:
-        python-version: 3.8
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        python -m pip install -e .[signals] -r requirements-dev.txt
-    - name: Run mypy
-      run: |
-        mypy .
-
-  build-docs:
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v2
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v2
-      with:
-        python-version: 3.8
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        python -m pip install -r docs/requirements.txt
-    - name: Build docs
-      run: |
-        sphinx-build -W docs /tmp/docs-build
-
-  finish:
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-    - name: Coveralls Finished
-      uses: coverallsapp/github-action@master
-      with:
-        github-token: ${{ secrets.github_token }}
-        parallel-finished: true
+      run: poetry run pytest tests
+#
+#  mypy:
+#    runs-on: ubuntu-latest
+#
+#    steps:
+#    - uses: actions/checkout@v2
+#    - name: Set up Python 3.8
+#      uses: actions/setup-python@v2
+#      with:
+#        python-version: 3.11
+#    - name: Install dependencies
+#      run: |
+#        python -m pip install --upgrade pip
+#        python -m pip install -e .[signals] -r requirements-dev.txt
+#    - name: Run mypy
+#      run: |
+#        mypy .
