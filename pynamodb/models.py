@@ -847,6 +847,71 @@ class Model(AttributeContainer, metaclass=MetaModel):
         )
 
     @classmethod
+    async def async_query(
+        cls: Type[_T],
+        hash_key: _KeyType,
+        range_key_condition: Optional[Condition] = None,
+        filter_condition: Optional[Condition] = None,
+        consistent_read: bool = False,
+        index_name: Optional[str] = None,
+        scan_index_forward: Optional[bool] = None,
+        limit: Optional[int] = None,
+        last_evaluated_key: Optional[Dict[str, Dict[str, Any]]] = None,
+        attributes_to_get: Optional[Iterable[str]] = None,
+        page_size: Optional[int] = None,
+        rate_limit: Optional[float] = None,
+    ) -> AsyncResultIterator[_T]:
+        """
+        Provides a high level async query API
+
+        :param hash_key: The hash key to query
+        :param range_key_condition: Condition for range key
+        :param filter_condition: Condition used to restrict the query results
+        :param consistent_read: If True, a consistent read is performed
+        :param index_name: If set, then this index is used
+        :param limit: Used to limit the number of results returned
+        :param scan_index_forward: If set, then used to specify the same parameter to the DynamoDB API.
+            Controls descending or ascending results
+        :param last_evaluated_key: If set, provides the starting point for query.
+        :param attributes_to_get: If set, only returns these elements
+        :param page_size: Page size of the query to DynamoDB
+        :param rate_limit: If set then consumed capacity will be limited to this amount per second
+        """
+        if index_name:
+            hash_key = cls._indexes[index_name]._hash_key_attribute().serialize(hash_key)
+        else:
+            hash_key = cls._serialize_keys(hash_key)[0]
+
+        # If this class has a discriminator attribute, filter the query to only return instances of this class.
+        discriminator_attr = cls._get_discriminator_attribute()
+        if discriminator_attr:
+            filter_condition &= discriminator_attr.is_in(*discriminator_attr.get_registered_subclasses(cls))
+
+        if page_size is None:
+            page_size = limit
+
+        query_args = (hash_key,)
+        query_kwargs = dict(
+            range_key_condition=range_key_condition,
+            filter_condition=filter_condition,
+            index_name=index_name,
+            exclusive_start_key=last_evaluated_key,
+            consistent_read=consistent_read,
+            scan_index_forward=scan_index_forward,
+            limit=page_size,
+            attributes_to_get=attributes_to_get,
+        )
+
+        return AsyncResultIterator(
+            cls._async_get_connection().query,
+            query_args,
+            query_kwargs,
+            map_fn=cls.from_raw_data,
+            limit=limit,
+            rate_limit=rate_limit,
+        )
+
+    @classmethod
     def scan(
         cls: Type[_T],
         filter_condition: Optional[Condition] = None,
@@ -896,6 +961,65 @@ class Model(AttributeContainer, metaclass=MetaModel):
 
         return ResultIterator(
             cls._get_connection().scan,
+            scan_args,
+            scan_kwargs,
+            map_fn=cls.from_raw_data,
+            limit=limit,
+            rate_limit=rate_limit,
+        )
+
+    @classmethod
+    async def async_scan(
+        cls: Type[_T],
+        filter_condition: Optional[Condition] = None,
+        segment: Optional[int] = None,
+        total_segments: Optional[int] = None,
+        limit: Optional[int] = None,
+        last_evaluated_key: Optional[Dict[str, Dict[str, Any]]] = None,
+        page_size: Optional[int] = None,
+        consistent_read: Optional[bool] = None,
+        index_name: Optional[str] = None,
+        rate_limit: Optional[float] = None,
+        attributes_to_get: Optional[Sequence[str]] = None,
+    ) -> AsyncResultIterator[_T]:
+        """
+        Iterates through all items in the table asynchronously
+
+        :param filter_condition: Condition used to restrict the scan results
+        :param segment: If set, then scans the segment
+        :param total_segments: If set, then specifies total segments
+        :param limit: Used to limit the number of results returned
+        :param last_evaluated_key: If set, provides the starting point for scan
+        :param page_size: Page size of the scan to DynamoDB
+        :param consistent_read: If True, a consistent read is performed
+        :param index_name: If set, then this index is used
+        :param rate_limit: If set then consumed capacity will be limited to this amount per second
+        :param attributes_to_get: If set, specifies the properties to include in the projection expression
+        """
+        # If this class has a discriminator attribute, filter the scan to only return instances of this class.
+        discriminator_attr = cls._get_discriminator_attribute()
+        if discriminator_attr:
+            filter_condition &= discriminator_attr.is_in(
+                *discriminator_attr.get_registered_subclasses(cls)
+            )
+
+        if page_size is None:
+            page_size = limit
+
+        scan_args = ()
+        scan_kwargs = dict(
+            filter_condition=filter_condition,
+            exclusive_start_key=last_evaluated_key,
+            segment=segment,
+            limit=page_size,
+            total_segments=total_segments,
+            consistent_read=consistent_read,
+            index_name=index_name,
+            attributes_to_get=attributes_to_get,
+        )
+
+        return AsyncResultIterator(
+            cls._async_get_connection().scan,
             scan_args,
             scan_kwargs,
             map_fn=cls.from_raw_data,
