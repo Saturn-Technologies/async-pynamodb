@@ -9,7 +9,6 @@ import botocore.client
 import botocore.exceptions
 from botocore.client import ClientError
 from botocore.exceptions import BotoCoreError
-from botocore.session import get_session
 
 from pynamodb.connection._botocore_private import BotocoreBaseClientPrivate
 from pynamodb.connection.abstracts import AbstractConnection
@@ -228,7 +227,7 @@ class MetaTable(object):
             }
 
 
-class Connection(AbstractConnection):
+class Connection(AbstractConnection[botocore.session.Session]):
     """
     A higher level abstraction over botocore
     """
@@ -313,20 +312,6 @@ class Connection(AbstractConnection):
                     table_names.append(op[TABLE_NAME])
             return ",".join(table_names)
         return operation_kwargs.get(TABLE_NAME)
-
-    @property
-    def session(self) -> botocore.session.Session:
-        """
-        Returns a valid botocore session
-        """
-        # botocore client creation is not thread safe as of v1.2.5+ (see issue #153)
-        if getattr(self._local, 'session', None) is None:
-            self._local.session = get_session()
-            if self._aws_access_key_id and self._aws_secret_access_key:
-                self._local.session.set_credentials(self._aws_access_key_id,
-                                                        self._aws_secret_access_key,
-                                                        self._aws_session_token)
-        return self._local.session
 
     @property
     def client(self) -> BotocoreBaseClientPrivate:

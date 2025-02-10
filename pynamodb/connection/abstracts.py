@@ -1,5 +1,10 @@
+import abc
+from abc import abstractmethod
 from threading import local
 from typing import Any, Dict, Mapping, Optional, Sequence
+
+from botocore.session import get_session
+from typing_extensions import overload
 
 
 from pynamodb.connection._botocore_private import BotocoreBaseClientPrivate
@@ -37,8 +42,11 @@ import typing
 if typing.TYPE_CHECKING:
     from pynamodb.connection.base import MetaTable
 
+T_BotoSession = typing.TypeVar("T_BotoSession")
 
-class AbstractConnection:
+class AbstractConnection(abc.ABC, typing.Generic[T_BotoSession]):
+    SESSION_FACTORY: typing.Callable[[], T_BotoSession] = get_session
+
     def __init__(
         self,
         region: Optional[str] = None,
@@ -97,6 +105,20 @@ class AbstractConnection:
 
     def __repr__(self) -> str:
         return "Connection<{}>".format(self.client.meta.endpoint_url)
+
+    @property
+    def session(self) -> T_BotoSession:
+        """
+        Returns a valid botocore session
+        """
+        # botocore client creation is not thread safe as of v1.2.5+ (see issue #153)
+        if getattr(self._local, 'session', None) is None:
+            self._local.session = self.SESSION_FACTORY()
+            if self._aws_access_key_id and self._aws_secret_access_key:
+                self._local.session.set_credentials(self._aws_access_key_id,
+                                                        self._aws_secret_access_key,
+                                                        self._aws_session_token)
+        return self._local.session
 
     def add_meta_table(self, meta_table: MetaTable) -> None:
         """
@@ -342,6 +364,16 @@ class AbstractConnection:
     @staticmethod
     def _reverse_dict(d):
         return {v: k for k, v in d.items()}
+
+
+    @overload
+    @abstractmethod
+    async def dispatch(self, operation_name: str, operation_kwargs: Dict) -> Dict:
+        ...
+
+    @abstractmethod
+    def dispatch(self, operation_name: str, operation_kwargs: Dict) -> Dict:
+        ...
 
 
 class AbstractTableConnection:
