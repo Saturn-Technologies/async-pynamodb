@@ -1,4 +1,5 @@
 import contextlib
+import logging
 import threading
 import typing
 from contextlib import AbstractAsyncContextManager
@@ -8,6 +9,7 @@ import aioboto3
 import asyncio
 import types_aiobotocore_dynamodb
 from aiobotocore.config import AioConfig
+from botocore.exceptions import ClientError
 
 from pynamodb.connection.abstracts import AbstractConnection
 from pynamodb.connection.base import BOTOCORE_EXCEPTIONS
@@ -47,6 +49,16 @@ from pynamodb.constants import (
     SCAN_INDEX_FORWARD,
     QUERY,
     KEY,
+    DESCRIBE_TABLE,
+    LIST_TABLES,
+    UPDATE_TABLE,
+    UPDATE_TIME_TO_LIVE,
+    DELETE_TABLE,
+    CREATE_TABLE,
+    RETURN_CONSUMED_CAPACITY,
+    TOTAL,
+    CONSUMED_CAPACITY,
+    CAPACITY_UNITS,
 )
 from pynamodb.exceptions import (
     DeleteError,
@@ -57,6 +69,8 @@ from pynamodb.exceptions import (
     ScanError,
     TableError,
     QueryError,
+    VerboseClientError,
+    CancellationReason,
 )
 from pynamodb.expressions.condition import Condition
 from pynamodb.expressions.operand import Path
@@ -68,6 +82,9 @@ thread_local = threading.local()
 ClientContext: ContextVar[contextlib.AsyncExitStack | None] = ContextVar(
     "ClientContext", default=None
 )
+
+log = logging.getLogger(__name__)
+log.addHandler(logging.NullHandler())
 
 
 class AsyncPynamoDB(AbstractAsyncContextManager):
@@ -94,10 +111,74 @@ class AsyncPynamoDB(AbstractAsyncContextManager):
 class AsyncConnection(AbstractConnection[aioboto3.Session]):
     SESSION_FACTORY = aioboto3.Session
 
+    async def _make_api_call(
+        self, operation_name: str, operation_kwargs: typing.Dict
+    ) -> typing.Dict:
+        try:
+            client = await self.get_client()
+            return await client._make_api_call(operation_name, operation_kwargs)  # type: ignore
+        except ClientError as e:
+            resp_metadata = e.response.get("ResponseMetadata", {}).get(
+                "HTTPHeaders", {}
+            )
+            cancellation_reasons = e.response.get("CancellationReasons", [])
+
+            botocore_props = {"Error": e.response.get("Error", {})}
+            verbose_props = {
+                "request_id": resp_metadata.get("x-amzn-requestid", ""),
+                "table_name": self._get_table_name_for_error_context(operation_kwargs),
+            }
+            raise VerboseClientError(
+                botocore_props,
+                operation_name,
+                verbose_props,
+                cancellation_reasons=(
+                    (
+                        CancellationReason(
+                            code=d["Code"],
+                            message=d.get("Message"),
+                            raw_item=typing.cast(
+                                typing.Optional[
+                                    typing.Dict[str, typing.Dict[str, typing.Any]]
+                                ],
+                                d.get("Item"),
+                            ),
+                        )
+                        if d["Code"] != "None"
+                        else None
+                    )
+                    for d in cancellation_reasons
+                ),
+            ) from e
+
     async def dispatch(
         self, operation_name: str, operation_kwargs: typing.Dict
     ) -> typing.Dict:
-        raise NotImplementedError()
+        if operation_name not in [
+            DESCRIBE_TABLE,
+            LIST_TABLES,
+            UPDATE_TABLE,
+            UPDATE_TIME_TO_LIVE,
+            DELETE_TABLE,
+            CREATE_TABLE,
+        ]:
+            if RETURN_CONSUMED_CAPACITY not in operation_kwargs:
+                operation_kwargs.update(self.get_consumed_capacity_map(TOTAL))
+        log.debug("Calling %s with arguments %s", operation_name, operation_kwargs)
+        # TODO: Implement somethin for `self.send_pre_boto_callback(operation_name, req_uuid, table_name)`
+        data = await self._make_api_call(operation_name, operation_kwargs)
+        # TODO: Implement somethin for `self.send_post_boto_callback(operation_name, req_uuid, table_name)`
+        if data and CONSUMED_CAPACITY in data:
+            capacity = data.get(CONSUMED_CAPACITY)
+            if isinstance(capacity, dict) and CAPACITY_UNITS in capacity:
+                capacity = capacity.get(CAPACITY_UNITS)
+            log.debug(
+                "%s %s consumed %s units",
+                data.get(TABLE_NAME, ""),
+                operation_name,
+                capacity,
+            )
+        return data
 
     async def get_client(self) -> types_aiobotocore_dynamodb.DynamoDBClient:
         if not self._client or (
