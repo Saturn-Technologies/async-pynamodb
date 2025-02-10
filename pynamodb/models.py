@@ -1083,6 +1083,7 @@ class Model(AttributeContainer, metaclass=MetaModel):
                                               aws_session_token=cls.Meta.aws_session_token)
         return cls._connection
 
+
     @classmethod
     def _serialize_value(cls, attr, value):
         """

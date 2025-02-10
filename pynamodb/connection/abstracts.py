@@ -27,7 +27,7 @@ from pynamodb.constants import (
     CLIENT_REQUEST_TOKEN,
     UPDATE_EXPRESSION,
     RETURN_VALUES_ON_CONDITION_FAILURE_VALUES,
-    RETURN_VALUES_ON_CONDITION_FAILURE,
+    RETURN_VALUES_ON_CONDITION_FAILURE, REQUEST_ITEMS, TRANSACT_ITEMS,
 )
 from pynamodb.exceptions import (
     TableError,
@@ -365,6 +365,17 @@ class AbstractConnection(abc.ABC, typing.Generic[T_BotoSession]):
     def _reverse_dict(d):
         return {v: k for k, v in d.items()}
 
+    def _get_table_name_for_error_context(self, operation_kwargs) -> str:
+        # First handle the two multi-table cases: batch and transaction operations
+        if REQUEST_ITEMS in operation_kwargs:
+            return ','.join(operation_kwargs[REQUEST_ITEMS])
+        elif TRANSACT_ITEMS in operation_kwargs:
+            table_names = []
+            for item in operation_kwargs[TRANSACT_ITEMS]:
+                for op in item.values():
+                    table_names.append(op[TABLE_NAME])
+            return ",".join(table_names)
+        return operation_kwargs.get(TABLE_NAME)
 
     @overload
     @abstractmethod
