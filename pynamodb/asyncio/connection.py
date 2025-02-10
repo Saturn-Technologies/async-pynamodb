@@ -87,7 +87,7 @@ log = logging.getLogger(__name__)
 log.addHandler(logging.NullHandler())
 
 
-class AsyncPynamoDB(AbstractAsyncContextManager):
+class AsyncPynamoDBContext(AbstractAsyncContextManager):
     def __init__(self):
         current_ctx = ClientContext.get()
         if current_ctx is not None:
