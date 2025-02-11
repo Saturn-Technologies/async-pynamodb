@@ -972,7 +972,7 @@ class Model(AttributeContainer, metaclass=MetaModel):
         )
 
     @classmethod
-    async def async_query(
+    def async_query(
         cls: Type[_T],
         hash_key: _KeyType,
         range_key_condition: Optional[Condition] = None,
@@ -1094,7 +1094,7 @@ class Model(AttributeContainer, metaclass=MetaModel):
         )
 
     @classmethod
-    async def async_scan(
+    def async_scan(
         cls: Type[_T],
         filter_condition: Optional[Condition] = None,
         segment: Optional[int] = None,
