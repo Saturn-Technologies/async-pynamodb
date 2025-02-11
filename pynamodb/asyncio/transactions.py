@@ -8,7 +8,6 @@ from pynamodb.transactions import TransactWrite
 
 # Type definitions
 T = typing.TypeVar("T")
-TransactionResponse = typing.Dict[str, typing.Any]
 TransactionItem = typing.Dict[str, typing.Any]
 
 if typing.TYPE_CHECKING:
@@ -90,7 +89,7 @@ class AsyncTransactWrite(TransactWrite, AsyncTransaction):
         self._update_items: typing.List[TransactionItem] = []
         self._models_for_version_attribute_update: typing.List["Model"] = []
 
-    async def _commit(self) -> TransactionResponse:
+    async def _commit(self) -> None:
         """
         Commits the transaction by executing all queued operations.
 
@@ -101,7 +100,7 @@ class AsyncTransactWrite(TransactWrite, AsyncTransaction):
             After successful commit, version attributes of all affected
             models are updated locally.
         """
-        response = await self._async_connection.transact_write_items(
+        await self._async_connection.transact_write_items(
             condition_check_items=self._condition_check_items,
             delete_items=self._delete_items,
             put_items=self._put_items,
@@ -115,4 +114,3 @@ class AsyncTransactWrite(TransactWrite, AsyncTransaction):
         for model in self._models_for_version_attribute_update:
             model.update_local_version_attribute()
 
-        return response

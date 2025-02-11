@@ -479,7 +479,7 @@ class Model(AttributeContainer, metaclass=MetaModel):
                 process_item(item)
             ```
         """
-        unprocessed_batch_items = list(items)
+        unprocessed_batch_items: list[Any] = list(items)
 
         while unprocessed_batch_items:
             to_process: List[Dict[str, Any]] = []
@@ -497,7 +497,10 @@ class Model(AttributeContainer, metaclass=MetaModel):
             async for items, unprocessed_items in as_completed(tasks):
                 to_process.extend(unprocessed_items or [])
                 for item in items:
-                    yield cls.from_raw_data(item)
+                    if isinstance(item, dict):
+                        yield cls.from_raw_data(item)
+                    else:
+                        raise ValueError("Got an unexpected type when reading the batch.")
 
             unprocessed_batch_items = to_process
             # Small delay to prevent tight loops
@@ -870,7 +873,8 @@ class Model(AttributeContainer, metaclass=MetaModel):
         if hash_key is None:
             if filter_condition is not None:
                 raise ValueError('A hash_key must be given to use filters')
-            return (await cls._async_get_connection().describe_table()).get(ITEM_COUNT)
+            item_count = (await cls._async_get_connection().describe_table()).get(ITEM_COUNT, 0)
+            return item_count
 
         if index_name:
             hash_key = cls._indexes[index_name]._hash_key_attribute().serialize(hash_key)

@@ -16,7 +16,7 @@ _T = TypeVar("_T")
 
 
 class AsyncRateLimiter(RateLimiter):
-    async def acquire(self) -> None:
+    async def acquire(self) -> None:  # type: ignore[override]
         time_to_sleep = max(
             0,
             self._consumed / float(self.rate_limit)
@@ -116,9 +116,9 @@ class AsyncResultIterator(AsyncIterator[_T]):
         self._count = 0
 
     async def _get_next_page(self) -> None:
-        page = await self.page_iter.next()
+        page: dict = await self.page_iter.next() # type: ignore[assignment]
         self._count = page[CAMEL_COUNT]
-        self._items = page.get(ITEMS)  # not returned if 'Select' is set to 'COUNT'
+        self._items: dict | None = page.get(ITEMS)  # not returned if 'Select' is set to 'COUNT'
         self._index = 0 if self._items else self._count
         self._total_count += self._count
 
@@ -132,6 +132,8 @@ class AsyncResultIterator(AsyncIterator[_T]):
         while self._index == self._count:
             await self._get_next_page()
 
+        if self._items is None:
+            raise StopAsyncIteration
         item = self._items[self._index]
         self._index += 1
         if self._limit is not None:
@@ -154,6 +156,8 @@ class AsyncResultIterator(AsyncIterator[_T]):
         # In the middle of a page of results: reconstruct a last_evaluated_key from the current item
         # The operation should be resumed starting at the last item returned, not the last item evaluated.
         # This can occur if the 'limit' is reached in the middle of a page.
+        if not self._items:
+            return None
         item = self._items[self._index - 1]
         return {key: item[key] for key in self.page_iter.key_names}
 

@@ -17,7 +17,7 @@ class TableConnection(AbstractTableConnection):
     A higher level abstraction over botocore
     """
 
-    CONNECTION_CLASS = Connection
+    CONNECTION_CLASS = Connection # type: ignore[assignment]
 
 
     def delete_item(

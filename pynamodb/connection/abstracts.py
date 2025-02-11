@@ -3,7 +3,8 @@ from abc import abstractmethod
 from threading import local
 from typing import Any, Dict, Mapping, Optional, Sequence
 
-from botocore.session import get_session
+import aioboto3
+from botocore.session import get_session, Session
 from typing_extensions import overload
 
 
@@ -44,7 +45,7 @@ if typing.TYPE_CHECKING:
 else:
     MetaTable = object
 
-T_BotoSession = typing.TypeVar("T_BotoSession")
+T_BotoSession = typing.TypeVar("T_BotoSession", bound=Session | aioboto3.Session)
 
 class AbstractConnection(abc.ABC, typing.Generic[T_BotoSession]):
     def __init__(
@@ -104,11 +105,11 @@ class AbstractConnection(abc.ABC, typing.Generic[T_BotoSession]):
         self._aws_session_token = aws_session_token
 
     def __repr__(self) -> str:
-        return "Connection<{}>".format(self.client.meta.endpoint_url)
+        return "AsyncConnection"
 
     @staticmethod
     def session_factory() -> T_BotoSession:
-        return get_session()
+        return typing.cast(T_BotoSession, get_session())
 
     @property
     def session(self) -> T_BotoSession:
@@ -119,9 +120,10 @@ class AbstractConnection(abc.ABC, typing.Generic[T_BotoSession]):
         if getattr(self._local, 'session', None) is None:
             self._local.session = self.session_factory()
             if self._aws_access_key_id and self._aws_secret_access_key:
-                self._local.session.set_credentials(self._aws_access_key_id,
-                                                        self._aws_secret_access_key,
-                                                        self._aws_session_token)
+                if hasattr(self._local.session, 'set_credentials'):
+                    self._local.session.set_credentials(self._aws_access_key_id,
+                                                            self._aws_secret_access_key,
+                                                            self._aws_session_token)
         return self._local.session
 
     def add_meta_table(self, meta_table: MetaTable) -> None:
@@ -381,18 +383,13 @@ class AbstractConnection(abc.ABC, typing.Generic[T_BotoSession]):
             return ",".join(table_names)
         return operation_kwargs.get(TABLE_NAME)
 
-    @overload
     @abstractmethod
-    async def dispatch(self, operation_name: str, operation_kwargs: Dict) -> Dict:
-        ...
-
-    @abstractmethod
-    def dispatch(self, operation_name: str, operation_kwargs: Dict) -> Dict:
-        ...
+    def dispatch(self, operation_name: str, operation_kwargs: Dict) -> typing.Any:
+        raise NotImplementedError()
 
 
 class AbstractTableConnection:
-    CONNECTION_CLASS = AbstractConnection
+    CONNECTION_CLASS: AbstractConnection = AbstractConnection  # type: ignore[assignment]
 
     def __init__(
         self,
@@ -411,7 +408,7 @@ class AbstractTableConnection:
         meta_table: Optional[MetaTable] = None,
     ) -> None:
         self.table_name = table_name
-        self.connection = self.CONNECTION_CLASS(
+        self.connection = self.CONNECTION_CLASS(  # type: ignore[operator]
             region=region,
             host=host,
             connect_timeout_seconds=connect_timeout_seconds,

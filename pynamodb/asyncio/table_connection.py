@@ -12,7 +12,7 @@ class AsyncTableConnection(AbstractTableConnection):
     """
 
     connection: AsyncConnection
-    CONNECTION_CLASS = AsyncConnection
+    CONNECTION_CLASS = AsyncConnection  # type: ignore[assignment]
 
     async def delete_item(
         self,

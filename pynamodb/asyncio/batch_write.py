@@ -15,12 +15,15 @@ from pynamodb.constants import (
 )
 from pynamodb.exceptions import PutError
 
-_T = typing.TypeVar("_T")
+if typing.TYPE_CHECKING:
+    from pynamodb.models import Model
+
+_T = typing.TypeVar("_T", bound="Model")
 BatchOperation = typing.Dict[str, typing.Any]
 SerializedItem = typing.Dict[str, typing.Any]
 
 
-class AsyncBatchWrite(typing.Generic[_T], typing.AsyncContextManager[typing.Self]):
+class AsyncBatchWrite(typing.Generic[_T], typing.AsyncContextManager["AsyncBatchWrite[_T]"]):
     """
     Async context manager for batch write operations in DynamoDB.
 

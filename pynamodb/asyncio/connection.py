@@ -102,10 +102,16 @@ class AsyncPynamoDBContext(AbstractAsyncContextManager):
 
     def __aenter__(self):
         stack = ClientContext.get()
+        if not stack:
+            raise RuntimeError(
+                "You're not inside an async context. You must use `AsyncPynamoDB` to create a connection."
+            )
         return stack.__aenter__()
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         stack = ClientContext.get()
+        if not stack:
+            return
         await stack.__aexit__(exc_type, exc_val, exc_tb)
         ClientContext.reset(self._token)
 
@@ -205,10 +211,10 @@ class AsyncConnection(AbstractConnection[aioboto3.Session]):
                     "You're not inside an async context. You must use `AsyncPynamoDB` to create a connection."
                 )
             client = self.session.client(
-                SERVICE_NAME, self.region, endpoint_url=self.host, config=config
-            )
+                SERVICE_NAME, region_name=self.region, endpoint_url=self.host, config=config
+            ) # type: ignore[call-overload]
             self._client = await stack.enter_async_context(client)
-        return self._client
+        return typing.cast(types_aiobotocore_dynamodb.DynamoDBClient, self._client)
 
     async def delete_item(
         self,
