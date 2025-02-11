@@ -176,7 +176,7 @@ class GlobalSecondaryIndex(Index[_M]):
     @classmethod
     def _update_model_schema(cls, schema: ModelSchema) -> None:
         index_schema: GlobalSecondaryIndexSchema = {
-            **cls._get_schema(),  # type:ignore[misc]  # https://github.com/python/mypy/pull/13353
+            **cls._get_schema(),
             'provisioned_throughput': {},
         }
 

@@ -9,9 +9,9 @@ from typing import Iterable
 from typing import List
 from typing import Optional
 if sys.version_info >= (3, 8):
-    from typing import Literal
+    pass
 else:
-    from typing_extensions import Literal
+    pass
 
 import botocore.exceptions
 

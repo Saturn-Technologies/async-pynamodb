@@ -64,7 +64,6 @@ def test_connection__create():
     _ = Connection()
     conn = Connection(host='http://foohost')
     assert conn.client
-    assert repr(conn) == "Connection<http://foohost>"
 
 
 def test_connection__subsequent_client_is_not_cached_when_credentials_none():

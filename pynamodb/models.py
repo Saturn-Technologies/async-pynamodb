@@ -1,14 +1,13 @@
 """
 DynamoDB Models for PynamoDB
 """
-import random
 import time
 import logging
 import warnings
 import sys
 from copy import deepcopy
 from inspect import getmembers
-from typing import Any
+from typing import Any, AsyncIterator
 from typing import Dict
 from typing import Generic
 from typing import Iterable
@@ -24,7 +23,15 @@ from typing import TypeVar
 from typing import Union
 from typing import cast
 
+import asyncio
+
+from aioitertools.asyncio import as_completed
+from more_itertools import ichunked
+
 from pynamodb._schema import ModelSchema
+from pynamodb.asyncio.batch_write import AsyncBatchWrite
+from pynamodb.asyncio.result_iterator import AsyncResultIterator
+from pynamodb.asyncio.table_connection import AsyncTableConnection
 from pynamodb.connection.base import MetaTable
 
 if sys.version_info >= (3, 8):
@@ -288,6 +295,7 @@ class Model(AttributeContainer, metaclass=MetaModel):
     _hash_keyname: Optional[str] = None
     _range_keyname: Optional[str] = None
     _connection: Optional[TableConnection] = None
+    _async_connection: Optional[AsyncTableConnection] = None
     DoesNotExist: Type[DoesNotExist] = DoesNotExist
     _version_attribute_name: Optional[str] = None
 
@@ -382,6 +390,123 @@ class Model(AttributeContainer, metaclass=MetaModel):
                 keys_to_get = []
 
     @classmethod
+    def _batch_serialize_keys(
+        cls, items: Iterable[Union[_KeyType, Iterable[_KeyType]]]
+    ) -> Iterator[Dict[str, Any]]:
+        """Serialize a collection of keys for batch operations.
+
+        Args:
+            items: Collection of primary keys or key pairs. For tables with composite keys,
+                  each item should be an iterable of (hash_key, range_key)
+
+        Returns:
+            Iterator of serialized key dictionaries
+
+        Raises:
+            ValueError: If key format is invalid for the table schema
+
+        Example:
+            ```python
+            # For a table with only hash key
+            keys = ["id1", "id2", "id3"]
+
+            # For a table with hash and range key
+            keys = [("id1", "sort1"), ("id2", "sort2")]
+            ```
+        """
+        hash_key_attribute = cls._hash_key_attribute()
+        range_key_attribute = cls._range_key_attribute()
+
+        for item in items:
+            if range_key_attribute:
+                if isinstance(item, str):
+                    raise ValueError(
+                        f"Invalid key value {item!r}: "
+                        "expected non-str iterable with exactly 2 elements (hash_key, range_key)"
+                    )
+                try:
+                    hash_key, range_key = item
+                except (TypeError, ValueError):
+                    raise ValueError(
+                        f"Invalid key value {item!r}: "
+                        "expected iterable with exactly 2 elements (hash_key, range_key)"
+                    )
+                hash_key_ser, range_key_ser = cls._serialize_keys(
+                    hash_key, range_key
+                )
+                yield {
+                    hash_key_attribute.attr_name: hash_key_ser,
+                    range_key_attribute.attr_name: range_key_ser,
+                }
+            else:
+                hash_key_ser, _ = cls._serialize_keys(item)
+                yield {hash_key_attribute.attr_name: hash_key_ser}
+
+    @classmethod
+    async def async_batch_get(
+        cls: Type[_T],
+        items: Iterable[Union[_KeyType, Iterable[_KeyType]]],
+        consistent_read: Optional[bool] = None,
+        attributes_to_get: Optional[Sequence[str]] = None,
+    ) -> AsyncIterator[_T]:
+        """Retrieve multiple items from DynamoDB in batches.
+
+        This method handles pagination and retries for unprocessed items automatically.
+        It yields items as they are retrieved, making it memory efficient for large datasets.
+
+        Args:
+            items: Collection of keys to retrieve. For tables with composite keys,
+                  each item should be an iterable of (hash_key, range_key)
+            consistent_read: Whether to use strongly consistent reads
+            attributes_to_get: Optional list of specific attributes to retrieve
+
+        Yields:
+            Model instances for each retrieved item
+
+        Raises:
+            GetError: If the batch get operation fails
+
+        Example:
+            ```python
+            # For a table with only hash key
+            keys = ["id1", "id2", "id3"]
+            async for item in wrapper.batch_get(keys):
+                process_item(item)
+
+            # For a table with hash and range key
+            keys = [("id1", "sort1"), ("id2", "sort2")]
+            async for item in wrapper.batch_get(keys):
+                process_item(item)
+            ```
+        """
+        unprocessed_batch_items: list[Any] = list(items)
+
+        while unprocessed_batch_items:
+            to_process: List[Dict[str, Any]] = []
+
+            # Create tasks for each chunk of keys
+            tasks = [
+                cls._async_batch_get_item(chunk, consistent_read, attributes_to_get)
+                for chunk in ichunked(
+                    cls._batch_serialize_keys(unprocessed_batch_items),
+                    BATCH_GET_PAGE_LIMIT,
+                )
+            ]
+
+            # Process completed tasks
+            async for items, unprocessed_items in as_completed(tasks):
+                to_process.extend(unprocessed_items or [])
+                for item in items:
+                    if isinstance(item, dict):
+                        yield cls.from_raw_data(item)
+                    else:
+                        raise ValueError("Got an unexpected type when reading the batch.")
+
+            unprocessed_batch_items = to_process
+            # Small delay to prevent tight loops
+            await asyncio.sleep(0)
+
+    @classmethod
     def batch_write(cls: Type[_T], auto_commit: bool = True) -> BatchWrite[_T]:
         """
         Returns a BatchWrite context manager for a batch operation.
@@ -393,6 +518,11 @@ class Model(AttributeContainer, metaclass=MetaModel):
                             (whether successful or not).
         """
         return BatchWrite(cls, auto_commit=auto_commit)
+
+    @classmethod
+    def async_batch_write(cls: Type[_T], auto_commit: bool = True) -> AsyncBatchWrite[_T]:
+        return AsyncBatchWrite(cls, auto_commit=auto_commit)
+
 
     def delete(self, condition: Optional[Condition] = None, *, add_version_condition: bool = True) -> Any:
         """
@@ -441,12 +571,58 @@ class Model(AttributeContainer, metaclass=MetaModel):
         self.deserialize(item_data)
         return data
 
+    async def async_update(self, actions: List[Action], condition: Optional[Condition] = None, *,
+                           add_version_condition: bool = True) -> Any:
+        """
+        Updates an item using the UpdateItem operation asynchronously.
+
+        :param actions: a list of Action updates to apply
+        :param condition: an optional Condition on which to update
+        :param add_version_condition: For models which have a VersionAttribute,
+          specifies whether only to update if the version matches the model that is currently loaded.
+          Set to `False` for a 'last write wins' strategy.
+          Regardless, the version will always be incremented to prevent "rollbacks" by concurrent calls.
+        :raises ModelInstance.DoesNotExist: if the object to be updated does not exist
+        :raises pynamodb.exceptions.UpdateError: if the `condition` is not met
+        """
+        if not isinstance(actions, list) or len(actions) == 0:
+            raise TypeError("the value of `actions` is expected to be a non-empty list")
+
+        hk_value, rk_value = self._get_hash_range_key_serialized_values()
+        version_condition = self._handle_version_attribute(actions=actions)
+        if add_version_condition and version_condition is not None:
+            condition &= version_condition
+
+        data = await self._async_get_connection().update_item(
+            hk_value,
+            range_key=rk_value,
+            return_values=ALL_NEW,
+            condition=condition,
+            actions=actions
+        )
+
+        item_data = data[ATTRIBUTES]
+        stored_cls = self._get_discriminator_class(item_data)
+        if stored_cls and stored_cls != type(self):
+            raise ValueError("Cannot update this item from the returned class: {}".format(stored_cls.__name__))
+        self.deserialize(item_data)
+        return data
+
     def save(self, condition: Optional[Condition] = None, *, add_version_condition: bool = True) -> Dict[str, Any]:
         """
         Save this object to dynamodb
         """
         args, kwargs = self._get_save_args(condition=condition, add_version_condition=add_version_condition)
         data = self._get_connection().put_item(*args, **kwargs)
+        self.update_local_version_attribute()
+        return data
+
+    async def async_save(self, condition: Optional[Condition] = None, *, add_version_condition: bool = True) -> Dict[str, Any]:
+        """
+        Save this object to dynamodb
+        """
+        args, kwargs = self._get_save_args(condition=condition, add_version_condition=add_version_condition)
+        data = await self._async_get_connection().put_item(*args, **kwargs)
         self.update_local_version_attribute()
         return data
 
@@ -467,6 +643,31 @@ class Model(AttributeContainer, metaclass=MetaModel):
         if stored_cls and stored_cls != type(self):
             raise ValueError("Cannot refresh this item from the returned class: {}".format(stored_cls.__name__))
         self.deserialize(item_data)
+
+    async def async_refresh(self, consistent_read: bool = False) -> None:
+        """
+        Retrieves this object's data from DynamoDB and syncs this local object asynchronously
+
+        :param consistent_read: If True, then a consistent read is performed.
+        :raises ModelInstance.DoesNotExist: if the object to be updated does not exist
+        """
+        hk_value, rk_value = self._get_hash_range_key_serialized_values()
+        attrs = await self._async_get_connection().get_item(
+            hk_value,
+            range_key=rk_value,
+            consistent_read=consistent_read
+        )
+
+        item_data = attrs.get(ITEM, None)
+        if item_data is None:
+            raise self.DoesNotExist("This item does not exist in the table.")
+
+        stored_cls = self._get_discriminator_class(item_data)
+        if stored_cls and stored_cls != type(self):
+            raise ValueError("Cannot refresh this item from the returned class: {}".format(stored_cls.__name__))
+
+        self.deserialize(item_data)
+
 
     def get_update_kwargs_from_instance(
         self,
@@ -555,6 +756,28 @@ class Model(AttributeContainer, metaclass=MetaModel):
         raise cls.DoesNotExist()
 
     @classmethod
+    async def async_get(
+        cls: Type[_T],
+        hash_key: _KeyType,
+        range_key: Optional[_KeyType] = None,
+        consistent_read: bool = False,
+        attributes_to_get: Optional[Sequence[Text]] = None,
+    ) -> _T:
+        hash_key, range_key = cls._serialize_keys(hash_key, range_key)
+        data = await cls._async_get_connection().get_item(
+            hash_key,
+            range_key=range_key,
+            consistent_read=consistent_read,
+            attributes_to_get=attributes_to_get,
+        )
+        if data:
+            item_data = data.get(ITEM)
+            if item_data:
+                return cls.from_raw_data(item_data)
+        raise cls.DoesNotExist()
+
+
+    @classmethod
     def from_raw_data(cls: Type[_T], data: Dict[str, Any]) -> _T:
         """
         Returns an instance of this class
@@ -627,6 +850,67 @@ class Model(AttributeContainer, metaclass=MetaModel):
         return result_iterator.total_count
 
     @classmethod
+    async def async_count(
+        cls: Type[_T],
+        hash_key: Optional[_KeyType] = None,
+        range_key_condition: Optional[Condition] = None,
+        filter_condition: Optional[Condition] = None,
+        consistent_read: bool = False,
+        index_name: Optional[str] = None,
+        limit: Optional[int] = None,
+        rate_limit: Optional[float] = None,
+    ) -> int:
+        """
+        Provides a filtered count asynchronously
+
+        :param hash_key: The hash key to query. Can be None.
+        :param range_key_condition: Condition for range key
+        :param filter_condition: Condition used to restrict the query results
+        :param consistent_read: If True, a consistent read is performed
+        :param index_name: If set, then this index is used
+        :param rate_limit: If set then consumed capacity will be limited to this amount per second
+        """
+        if hash_key is None:
+            if filter_condition is not None:
+                raise ValueError('A hash_key must be given to use filters')
+            item_count = (await cls._async_get_connection().describe_table()).get(ITEM_COUNT, 0)
+            return item_count
+
+        if index_name:
+            hash_key = cls._indexes[index_name]._hash_key_attribute().serialize(hash_key)
+        else:
+            hash_key = cls._serialize_keys(hash_key)[0]
+
+        # If this class has a discriminator attribute, filter the query to only return instances of this class.
+        discriminator_attr = cls._get_discriminator_attribute()
+        if discriminator_attr:
+            filter_condition &= discriminator_attr.is_in(*discriminator_attr.get_registered_subclasses(cls))
+
+        query_args = (hash_key,)
+        query_kwargs = dict(
+            range_key_condition=range_key_condition,
+            filter_condition=filter_condition,
+            index_name=index_name,
+            consistent_read=consistent_read,
+            limit=limit,
+            select=COUNT
+        )
+
+        result_iterator: AsyncResultIterator[_T] = AsyncResultIterator(
+            cls._async_get_connection().query,
+            query_args,
+            query_kwargs,
+            limit=limit,
+            rate_limit=rate_limit,
+        )
+
+        # iterate through results
+        async for _ in result_iterator:
+            pass
+
+        return result_iterator.total_count
+
+    @classmethod
     def query(
         cls: Type[_T],
         hash_key: _KeyType,
@@ -692,6 +976,71 @@ class Model(AttributeContainer, metaclass=MetaModel):
         )
 
     @classmethod
+    def async_query(
+        cls: Type[_T],
+        hash_key: _KeyType,
+        range_key_condition: Optional[Condition] = None,
+        filter_condition: Optional[Condition] = None,
+        consistent_read: bool = False,
+        index_name: Optional[str] = None,
+        scan_index_forward: Optional[bool] = None,
+        limit: Optional[int] = None,
+        last_evaluated_key: Optional[Dict[str, Dict[str, Any]]] = None,
+        attributes_to_get: Optional[Iterable[str]] = None,
+        page_size: Optional[int] = None,
+        rate_limit: Optional[float] = None,
+    ) -> AsyncResultIterator[_T]:
+        """
+        Provides a high level async query API
+
+        :param hash_key: The hash key to query
+        :param range_key_condition: Condition for range key
+        :param filter_condition: Condition used to restrict the query results
+        :param consistent_read: If True, a consistent read is performed
+        :param index_name: If set, then this index is used
+        :param limit: Used to limit the number of results returned
+        :param scan_index_forward: If set, then used to specify the same parameter to the DynamoDB API.
+            Controls descending or ascending results
+        :param last_evaluated_key: If set, provides the starting point for query.
+        :param attributes_to_get: If set, only returns these elements
+        :param page_size: Page size of the query to DynamoDB
+        :param rate_limit: If set then consumed capacity will be limited to this amount per second
+        """
+        if index_name:
+            hash_key = cls._indexes[index_name]._hash_key_attribute().serialize(hash_key)
+        else:
+            hash_key = cls._serialize_keys(hash_key)[0]
+
+        # If this class has a discriminator attribute, filter the query to only return instances of this class.
+        discriminator_attr = cls._get_discriminator_attribute()
+        if discriminator_attr:
+            filter_condition &= discriminator_attr.is_in(*discriminator_attr.get_registered_subclasses(cls))
+
+        if page_size is None:
+            page_size = limit
+
+        query_args = (hash_key,)
+        query_kwargs = dict(
+            range_key_condition=range_key_condition,
+            filter_condition=filter_condition,
+            index_name=index_name,
+            exclusive_start_key=last_evaluated_key,
+            consistent_read=consistent_read,
+            scan_index_forward=scan_index_forward,
+            limit=page_size,
+            attributes_to_get=attributes_to_get,
+        )
+
+        return AsyncResultIterator(
+            cls._async_get_connection().query,
+            query_args,
+            query_kwargs,
+            map_fn=cls.from_raw_data,
+            limit=limit,
+            rate_limit=rate_limit,
+        )
+
+    @classmethod
     def scan(
         cls: Type[_T],
         filter_condition: Optional[Condition] = None,
@@ -741,6 +1090,65 @@ class Model(AttributeContainer, metaclass=MetaModel):
 
         return ResultIterator(
             cls._get_connection().scan,
+            scan_args,
+            scan_kwargs,
+            map_fn=cls.from_raw_data,
+            limit=limit,
+            rate_limit=rate_limit,
+        )
+
+    @classmethod
+    def async_scan(
+        cls: Type[_T],
+        filter_condition: Optional[Condition] = None,
+        segment: Optional[int] = None,
+        total_segments: Optional[int] = None,
+        limit: Optional[int] = None,
+        last_evaluated_key: Optional[Dict[str, Dict[str, Any]]] = None,
+        page_size: Optional[int] = None,
+        consistent_read: Optional[bool] = None,
+        index_name: Optional[str] = None,
+        rate_limit: Optional[float] = None,
+        attributes_to_get: Optional[Sequence[str]] = None,
+    ) -> AsyncResultIterator[_T]:
+        """
+        Iterates through all items in the table asynchronously
+
+        :param filter_condition: Condition used to restrict the scan results
+        :param segment: If set, then scans the segment
+        :param total_segments: If set, then specifies total segments
+        :param limit: Used to limit the number of results returned
+        :param last_evaluated_key: If set, provides the starting point for scan
+        :param page_size: Page size of the scan to DynamoDB
+        :param consistent_read: If True, a consistent read is performed
+        :param index_name: If set, then this index is used
+        :param rate_limit: If set then consumed capacity will be limited to this amount per second
+        :param attributes_to_get: If set, specifies the properties to include in the projection expression
+        """
+        # If this class has a discriminator attribute, filter the scan to only return instances of this class.
+        discriminator_attr = cls._get_discriminator_attribute()
+        if discriminator_attr:
+            filter_condition &= discriminator_attr.is_in(
+                *discriminator_attr.get_registered_subclasses(cls)
+            )
+
+        if page_size is None:
+            page_size = limit
+
+        scan_args = ()
+        scan_kwargs = dict(
+            filter_condition=filter_condition,
+            exclusive_start_key=last_evaluated_key,
+            segment=segment,
+            limit=page_size,
+            total_segments=total_segments,
+            consistent_read=consistent_read,
+            index_name=index_name,
+            attributes_to_get=attributes_to_get,
+        )
+
+        return AsyncResultIterator(
+            cls._async_get_connection().scan,
             scan_args,
             scan_kwargs,
             map_fn=cls.from_raw_data,
@@ -1027,6 +1435,15 @@ class Model(AttributeContainer, metaclass=MetaModel):
         return item_data, unprocessed_items
 
     @classmethod
+    async def _async_batch_get_item(cls, keys_to_get, consistent_read, attributes_to_get):
+        data = await cls._async_get_connection().batch_get_item(
+            keys_to_get, consistent_read=consistent_read, attributes_to_get=attributes_to_get,
+        )
+        item_data = data.get(RESPONSES).get(cls.Meta.table_name)  # type: ignore
+        unprocessed_items = data.get(UNPROCESSED_KEYS).get(cls.Meta.table_name, {}).get(KEYS, None)  # type: ignore
+        return item_data, unprocessed_items
+
+    @classmethod
     def _get_connection(cls) -> TableConnection:
         """
         Returns a (cached) connection
@@ -1083,6 +1500,62 @@ class Model(AttributeContainer, metaclass=MetaModel):
                                               aws_secret_access_key=cls.Meta.aws_secret_access_key,
                                               aws_session_token=cls.Meta.aws_session_token)
         return cls._connection
+
+    @classmethod
+    def _async_get_connection(cls) -> AsyncTableConnection:
+        if not hasattr(cls, "Meta"):
+            raise AttributeError(
+                'As of v1.0 PynamoDB Models require a `Meta` class.\n'
+                'Model: {}.{}\n'
+                'See https://pynamodb.readthedocs.io/en/latest/release_notes.html\n'.format(
+                    cls.__module__, cls.__name__,
+                ),
+            )
+        elif not hasattr(cls.Meta, "table_name") or cls.Meta.table_name is None:
+            raise AttributeError(
+                'As of v1.0 PynamoDB Models must have a table_name\n'
+                'Model: {}.{}\n'
+                'See https://pynamodb.readthedocs.io/en/latest/release_notes.html'.format(
+                    cls.__module__, cls.__name__,
+                ),
+            )
+        # For now we just check that the connection exists and (in the case of model inheritance)
+        # points to the same table. In the future we should update the connection if any of the attributes differ.
+        if cls._async_connection is None or cls._async_connection.table_name != cls.Meta.table_name:
+            schema = cls._get_schema()
+            meta_table = MetaTable({
+                constants.TABLE_NAME: cls.Meta.table_name,
+                constants.KEY_SCHEMA: schema['key_schema'],
+                constants.ATTR_DEFINITIONS: schema['attribute_definitions'],
+                constants.GLOBAL_SECONDARY_INDEXES: [
+                    {
+                        constants.INDEX_NAME: index_schema['index_name'],
+                        constants.KEY_SCHEMA: index_schema['key_schema'],
+                    }
+                    for index_schema in schema['global_secondary_indexes']
+                ],
+                constants.LOCAL_SECONDARY_INDEXES: [
+                    {
+                        constants.INDEX_NAME: index_schema['index_name'],
+                        constants.KEY_SCHEMA: index_schema['key_schema'],
+                    }
+                    for index_schema in schema['local_secondary_indexes']
+                ],
+            })
+            cls._async_connection = AsyncTableConnection(cls.Meta.table_name,
+                                              meta_table=meta_table,
+                                              region=cls.Meta.region,
+                                              host=cls.Meta.host,
+                                              connect_timeout_seconds=cls.Meta.connect_timeout_seconds,
+                                              read_timeout_seconds=cls.Meta.read_timeout_seconds,
+                                              max_retry_attempts=cls.Meta.max_retry_attempts,
+                                              max_pool_connections=cls.Meta.max_pool_connections,
+                                              extra_headers=cls.Meta.extra_headers,
+                                              aws_access_key_id=cls.Meta.aws_access_key_id,
+                                              aws_secret_access_key=cls.Meta.aws_secret_access_key,
+                                              aws_session_token=cls.Meta.aws_session_token)
+        return cls._async_connection
+
 
     @classmethod
     def _serialize_value(cls, attr, value):
