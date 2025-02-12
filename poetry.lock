@@ -283,7 +283,7 @@ crt = ["awscrt (==0.23.4)"]
 name = "botocore-stubs"
 version = "1.36.16"
 description = "Type annotations and code completion for botocore"
-optional = false
+optional = true
 python-versions = ">=3.8"
 files = [
     {file = "botocore_stubs-1.36.16-py3-none-any.whl", hash = "sha256:0d888f16b29adec2648d1e0c0d2b5efcda4520d228a5fa038f62d408e03a2502"},
@@ -895,7 +895,7 @@ files = [
 name = "types-aioboto3"
 version = "13.4.0"
 description = "Type annotations for aioboto3 13.4.0 generated with mypy-boto3-builder 8.8.0"
-optional = false
+optional = true
 python-versions = ">=3.8"
 files = [
     {file = "types_aioboto3-13.4.0-py3-none-any.whl", hash = "sha256:73749e313eb3c64523efdefdf2e76d6ea5112298cf3e10074e3981a982ca7f36"},
@@ -1322,7 +1322,7 @@ xray = ["types-aiobotocore-xray (>=2.18.0,<2.19.0)"]
 name = "types-aiobotocore"
 version = "2.19.0"
 description = "Type annotations for aiobotocore 2.19.0 generated with mypy-boto3-builder 8.8.0"
-optional = false
+optional = true
 python-versions = ">=3.8"
 files = [
     {file = "types_aiobotocore-2.19.0-py3-none-any.whl", hash = "sha256:9264d2f4b5b9c3167fce8212a9c62ecdda15d52d8d77811040c653ca69aca74f"},
@@ -1746,7 +1746,7 @@ xray = ["types-aiobotocore-xray (>=2.19.0,<2.20.0)"]
 name = "types-aiobotocore-dynamodb"
 version = "2.18.0"
 description = "Type annotations for aiobotocore DynamoDB 2.18.0 service generated with mypy-boto3-builder 8.8.0"
-optional = false
+optional = true
 python-versions = ">=3.8"
 files = [
     {file = "types_aiobotocore_dynamodb-2.18.0-py3-none-any.whl", hash = "sha256:db28c0507937e8a9261e09dd0259f229cb83cda6d1e4ff52314536bc2d0b7e7c"},
@@ -1760,7 +1760,7 @@ typing-extensions = {version = "*", markers = "python_version < \"3.12\""}
 name = "types-awscrt"
 version = "0.23.9"
 description = "Type annotations and code completion for awscrt"
-optional = false
+optional = true
 python-versions = ">=3.8"
 files = [
     {file = "types_awscrt-0.23.9-py3-none-any.whl", hash = "sha256:71181a6c5188352ae934e74a7633d80c82ac5c6f89054bd7d653bb1b5bba240b"},
@@ -1771,7 +1771,7 @@ files = [
 name = "types-s3transfer"
 version = "0.11.2"
 description = "Type annotations and code completion for s3transfer"
-optional = false
+optional = true
 python-versions = ">=3.8"
 files = [
     {file = "types_s3transfer-0.11.2-py3-none-any.whl", hash = "sha256:09c31cff8c79a433fcf703b840b66d1f694a6c70c410ef52015dd4fe07ee0ae2"},
@@ -1991,10 +1991,10 @@ multidict = ">=4.0"
 propcache = ">=0.2.0"
 
 [extras]
-asyncio = ["aioboto3", "aioitertools", "asyncio"]
+asyncio = ["aioboto3", "aioitertools", "asyncio", "types-aioboto3"]
 signals = ["blinker"]
 
 [metadata]
 lock-version = "2.0"
 python-versions = "~3.11"
-content-hash = "67ad3651e7ea4163d5416d49cb1fd2545de62e0b6b6fa30dc61075d6c493d5e4"
+content-hash = "9d47f3f8f78a43f92b519564a72fac0ea3d07448877deca4127cc295c1049aa0"
