@@ -17,7 +17,7 @@ def async_tracer(operation_name: str, operation_kwargs: dict) -> Generator[None,
         meta = {
             "aws.agent": "pynamodb",
             "aws.operation": operation_name,
-            "asyncio": True
+            "asyncio": "true"
         }
         span.set_tags(meta)
         yield
