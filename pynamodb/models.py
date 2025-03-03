@@ -32,7 +32,6 @@ from pynamodb._schema import ModelSchema
 from pynamodb.asyncio.batch_write import AsyncBatchWrite
 from pynamodb.asyncio.result_iterator import AsyncResultIterator
 from pynamodb.asyncio.table_connection import AsyncTableConnection
-from pynamodb.asyncio.trace import pynamo_tracer
 from pynamodb.connection.base import MetaTable
 
 if sys.version_info >= (3, 8):
@@ -444,7 +443,6 @@ class Model(AttributeContainer, metaclass=MetaModel):
                 yield {hash_key_attribute.attr_name: hash_key_ser}
 
     @classmethod
-    @pynamo_tracer(name="AsyncBatchGet")
     async def async_batch_get(
         cls: Type[_T],
         items: Iterable[Union[_KeyType, Iterable[_KeyType]]],
@@ -522,7 +520,6 @@ class Model(AttributeContainer, metaclass=MetaModel):
         return BatchWrite(cls, auto_commit=auto_commit)
 
     @classmethod
-    @pynamo_tracer(name="AsyncBatchWrite")
     def async_batch_write(cls: Type[_T], auto_commit: bool = True) -> AsyncBatchWrite[_T]:
         return AsyncBatchWrite(cls, auto_commit=auto_commit)
 
@@ -574,7 +571,6 @@ class Model(AttributeContainer, metaclass=MetaModel):
         self.deserialize(item_data)
         return data
 
-    @pynamo_tracer(name="AsyncUpdate")
     async def async_update(self, actions: List[Action], condition: Optional[Condition] = None, *,
                            add_version_condition: bool = True) -> Any:
         """
@@ -621,7 +617,6 @@ class Model(AttributeContainer, metaclass=MetaModel):
         self.update_local_version_attribute()
         return data
 
-    @pynamo_tracer(name="AsyncSave")
     async def async_save(self, condition: Optional[Condition] = None, *, add_version_condition: bool = True) -> Dict[str, Any]:
         """
         Save this object to dynamodb
@@ -649,7 +644,6 @@ class Model(AttributeContainer, metaclass=MetaModel):
             raise ValueError("Cannot refresh this item from the returned class: {}".format(stored_cls.__name__))
         self.deserialize(item_data)
 
-    @pynamo_tracer(name="AsyncRefresh")
     async def async_refresh(self, consistent_read: bool = False) -> None:
         """
         Retrieves this object's data from DynamoDB and syncs this local object asynchronously
@@ -762,7 +756,6 @@ class Model(AttributeContainer, metaclass=MetaModel):
         raise cls.DoesNotExist()
 
     @classmethod
-    @pynamo_tracer(name="AsyncGet")
     async def async_get(
         cls: Type[_T],
         hash_key: _KeyType,
@@ -857,7 +850,6 @@ class Model(AttributeContainer, metaclass=MetaModel):
         return result_iterator.total_count
 
     @classmethod
-    @pynamo_tracer(name="AsyncCount")
     async def async_count(
         cls: Type[_T],
         hash_key: Optional[_KeyType] = None,
@@ -984,7 +976,6 @@ class Model(AttributeContainer, metaclass=MetaModel):
         )
 
     @classmethod
-    @pynamo_tracer(name="AsyncQuery")
     def async_query(
         cls: Type[_T],
         hash_key: _KeyType,
@@ -1107,7 +1098,6 @@ class Model(AttributeContainer, metaclass=MetaModel):
         )
 
     @classmethod
-    @pynamo_tracer(name="AsyncScan")
     def async_scan(
         cls: Type[_T],
         filter_condition: Optional[Condition] = None,
