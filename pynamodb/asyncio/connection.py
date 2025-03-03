@@ -88,6 +88,13 @@ ClientContext: ContextVar[contextlib.AsyncExitStack | None] = ContextVar(
 log = logging.getLogger(__name__)
 log.addHandler(logging.NullHandler())
 
+try:
+    from pynamodb.asyncio.tracer.dd import async_tracer
+    tracer = async_tracer
+except ImportError:
+    from pynamodb.asyncio.tracer.default import noop_async_tracer
+    tracer = noop_async_tracer
+
 
 class AsyncPynamoDBContext(AbstractAsyncContextManager):
     def __init__(self):
@@ -125,8 +132,10 @@ class AsyncConnection(AbstractConnection[aioboto3.Session]):
         self, operation_name: str, operation_kwargs: typing.Dict
     ) -> typing.Dict:
         try:
-            client = await self.get_client()
-            return await client._make_api_call(operation_name, operation_kwargs)  # type: ignore
+            with tracer(operation_name, operation_kwargs):
+                client = await self.get_client()
+                result = await client._make_api_call(operation_name, operation_kwargs)  # type: ignore
+            return result
         except ClientError as e:
             resp_metadata = e.response.get("ResponseMetadata", {}).get(
                 "HTTPHeaders", {}
