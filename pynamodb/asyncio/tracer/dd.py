@@ -19,5 +19,5 @@ def async_tracer(operation_name: str, operation_kwargs: dict) -> Generator[None,
             "aws.operation": operation_name,
             "asyncio": "true"
         }
-        span.set_tags(meta)
+        span.set_tags(meta) # type: ignore
         yield
