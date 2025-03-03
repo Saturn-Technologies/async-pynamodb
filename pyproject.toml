@@ -30,6 +30,7 @@ pytest-asyncio = "^0.25.3"
 [tool.poetry.group.dev.dependencies]
 mypy = "^1.15.0"
 ruff = "^0.9.6"
+ddtrace = "^3.1.0"
 
 [tool.ruff]
 include = ["pyproject.toml", "pynamodb/**/*.py"]
