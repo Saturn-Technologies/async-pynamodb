@@ -101,7 +101,7 @@ class AsyncBatchWrite(typing.Generic[_T], typing.AsyncContextManager["AsyncBatch
         The cleanup operation is shielded from cancellation and has a timeout to prevent hanging.
         If the cleanup times out, any remaining operations will be lost.
         """
-        async with anyio.fail_after(self.CLEANUP_TIMEOUT, shield=True): # noqa: ASYNC102 - this is handled but flake8 can't detect it
+        with anyio.fail_after(self.CLEANUP_TIMEOUT, shield=True):
             await self.commit()
 
     def _to_process_tasks(self) -> typing.Iterable[

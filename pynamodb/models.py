@@ -25,6 +25,7 @@ from typing import cast
 
 import asyncio
 
+import aioitertools
 from aioitertools.asyncio import as_completed
 from more_itertools import chunked
 
@@ -479,7 +480,7 @@ class Model(AttributeContainer, metaclass=MetaModel):
                 process_item(item)
             ```
         """
-        items = []
+        return_items = []
         unprocessed_batch_items: list[Any] = list(items)
 
         while unprocessed_batch_items:
@@ -498,14 +499,14 @@ class Model(AttributeContainer, metaclass=MetaModel):
                 to_process.extend(unprocessed_items or [])
                 for item in items:
                     if isinstance(item, dict):
-                        items.append(cls.from_raw_data(item))
+                        return_items.append(cls.from_raw_data(item))
                     else:
                         raise ValueError("Got an unexpected type when reading the batch.")
             unprocessed_batch_items = to_process
             # Small delay to prevent tight loops
             await asyncio.sleep(0)
         await asyncio.sleep(0)
-        return items
+        return aioitertools.iter(return_items)
 
     @classmethod
     def batch_write(cls: Type[_T], auto_commit: bool = True) -> BatchWrite[_T]:

@@ -97,27 +97,25 @@ class AsyncPynamoDBContext(AbstractAsyncContextManager):
     CLEANUP_TIMEOUT = 10
 
     def __init__(self):
-        _, token = create_stack(fail_if_exists=True)
-        self._context_token = token
+        self._context_token = None
         self._client_token = None
 
     async def __aenter__(self):
-        stack = get_stack()
+        stack, token = await create_stack()
         self._client_token = await create_client_stack()
-        if not stack:
-            raise RuntimeError(
-                "You're not inside an async context. You must use `AsyncPynamoDB` to create a connection."
-            )
+        self._context_token = token
         return await stack.__aenter__()
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         stack = get_stack()
-        async with anyio.fail_after(self.CLEANUP_TIMEOUT, shield=True): # noqa: ASYNC102 - this is handled but flake8 can't detect it
+        with anyio.fail_after(self.CLEANUP_TIMEOUT, shield=True):
             if not stack:
                 return await asyncio.sleep(0)
             await stack.__aexit__(exc_type, exc_val, exc_tb)
-            await reset_stack(self._context_token)
-            await reset_client_stack(self._client_token)
+            if self._context_token:
+                await reset_stack(self._context_token)
+            if self._client_token:
+                await reset_client_stack(self._client_token)
 
 
 class AsyncConnection(AbstractConnection[aioboto3.Session]):
@@ -207,8 +205,7 @@ class AsyncConnection(AbstractConnection[aioboto3.Session]):
                 "mode": "standard",
             },
         )
-        client = await get_or_create_client(session=self.session, connection_id=self._id, region=self.region, host=self.host, config=config)
-        return typing.cast(types_aiobotocore_dynamodb.DynamoDBClient, client)
+        return await get_or_create_client(session=self.session, connection_id=self._id, region=self.region, host=self.host, config=config)
 
     async def delete_item(
         self,

@@ -65,7 +65,7 @@ class AsyncTransaction(AbstractAsyncContextManager):
             exc_val: The instance of the exception that was raised
             exc_tb: The traceback of the exception that was raised
         """
-        async with anyio.fail_after(self.CLEANUP_TIMEOUT, shield=True): # noqa: ASYNC102 - this is handled but flake8 can't detect it
+        with anyio.fail_after(self.CLEANUP_TIMEOUT, shield=True):
             if all(x is None for x in (exc_type, exc_val, exc_tb)):
                 await self._commit()
             await asyncio.sleep(0)

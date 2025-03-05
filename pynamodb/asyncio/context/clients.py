@@ -24,7 +24,7 @@ async def _create_client(
     session: aioboto3.Session,
     connection_id: str,
     region: str,
-    host: str,
+    host: str | None,
     config: AioConfig,
 ) -> types_aiobotocore_dynamodb.DynamoDBClient:
     async with _lock:
@@ -36,12 +36,13 @@ async def _create_client(
             return clients[connection_id]
 
         # Create the client
-        client = await add_to_stack(session.client(
+        _client_cm = session.client(
             SERVICE_NAME,
             region_name=region,
             endpoint_url=host,
             config=config,
-        ))
+        ) # type: ignore[call-overload]
+        client = await add_to_stack(_client_cm)
 
         # Add the client to the stack
         clients[connection_id] = client
@@ -53,7 +54,7 @@ async def get_or_create_client(
     session: aioboto3.Session,
     connection_id: str,
     region: str,
-    host: str,
+    host: str | None,
     config: AioConfig,
 ) -> types_aiobotocore_dynamodb.DynamoDBClient:
     client = await _get_client(connection_id)
