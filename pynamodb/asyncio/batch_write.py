@@ -56,6 +56,7 @@ class AsyncBatchWrite(typing.Generic[_T], typing.AsyncContextManager["AsyncBatch
             if self.auto_commit:
                 await self.commit()
         self.pending_operations.append({"action": PUT, "item": put_item})
+        await asyncio.sleep(0)
 
     async def delete(self, del_item: _T) -> None:
         """
@@ -75,9 +76,11 @@ class AsyncBatchWrite(typing.Generic[_T], typing.AsyncContextManager["AsyncBatch
             if self.auto_commit:
                 await self.commit()
         self.pending_operations.append({"action": DELETE, "item": del_item})
+        await asyncio.sleep(0)
 
     async def __aenter__(self) -> "AsyncBatchWrite[_T]":
         """Enter the async context manager."""
+        await asyncio.sleep(0)
         return self
 
     async def __aexit__(
