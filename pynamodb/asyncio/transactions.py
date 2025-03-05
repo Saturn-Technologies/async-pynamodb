@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import typing
 from contextlib import AbstractAsyncContextManager
+
+import anyio
 
 from pynamodb.asyncio.connection import AsyncConnection
 from pynamodb.transactions import TransactWrite
@@ -24,6 +27,7 @@ class AsyncTransaction(AbstractAsyncContextManager):
     """
 
     _async_connection: AsyncConnection
+    CLEANUP_TIMEOUT = 10
 
     def __init__(
         self,
@@ -44,6 +48,7 @@ class AsyncTransaction(AbstractAsyncContextManager):
 
     async def __aenter__(self) -> AsyncTransaction:
         """Enter the async context manager."""
+        await asyncio.sleep(0)
         return self
 
     async def __aexit__(
@@ -60,8 +65,10 @@ class AsyncTransaction(AbstractAsyncContextManager):
             exc_val: The instance of the exception that was raised
             exc_tb: The traceback of the exception that was raised
         """
-        if all(x is None for x in (exc_type, exc_val, exc_tb)):
-            await self._commit()
+        async with anyio.fail_after(self.CLEANUP_TIMEOUT, shield=True): # noqa: ASYNC102 - this is handled but flake8 can't detect it
+            if all(x is None for x in (exc_type, exc_val, exc_tb)):
+                await self._commit()
+            await asyncio.sleep(0)
 
 
 class AsyncTransactWrite(TransactWrite, AsyncTransaction):

@@ -26,7 +26,7 @@ from typing import cast
 import asyncio
 
 from aioitertools.asyncio import as_completed
-from more_itertools import ichunked
+from more_itertools import chunked
 
 from pynamodb._schema import ModelSchema
 from pynamodb.asyncio.batch_write import AsyncBatchWrite
@@ -479,6 +479,7 @@ class Model(AttributeContainer, metaclass=MetaModel):
                 process_item(item)
             ```
         """
+        items = []
         unprocessed_batch_items: list[Any] = list(items)
 
         while unprocessed_batch_items:
@@ -487,24 +488,24 @@ class Model(AttributeContainer, metaclass=MetaModel):
             # Create tasks for each chunk of keys
             tasks = [
                 cls._async_batch_get_item(chunk, consistent_read, attributes_to_get)
-                for chunk in ichunked(
+                for chunk in chunked(
                     cls._batch_serialize_keys(unprocessed_batch_items),
                     BATCH_GET_PAGE_LIMIT,
                 )
             ]
-
             # Process completed tasks
             async for items, unprocessed_items in as_completed(tasks):
                 to_process.extend(unprocessed_items or [])
                 for item in items:
                     if isinstance(item, dict):
-                        yield cls.from_raw_data(item)
+                        items.append(cls.from_raw_data(item))
                     else:
                         raise ValueError("Got an unexpected type when reading the batch.")
-
             unprocessed_batch_items = to_process
             # Small delay to prevent tight loops
             await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        return items
 
     @classmethod
     def batch_write(cls: Type[_T], auto_commit: bool = True) -> BatchWrite[_T]:

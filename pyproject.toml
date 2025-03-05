@@ -13,10 +13,11 @@ aioboto3 = { version = "^13.4.0", optional = true }
 aioitertools = { version = "^0.12.0", optional = true }
 types-aioboto3 = {extras = ["dynamodb"], version = "^13.4.0", optional = true}
 more-itertools = "^10.6.0"
+anyio = { version = "^4.7.0", optional = true }
 
 [tool.poetry.extras]
 signals = ["blinker"]
-asyncio = ["asyncio", "aioboto3", "aioitertools", "types-aioboto3"]
+asyncio = ["asyncio", "aioboto3", "aioitertools", "types-aioboto3", "anyio"]
 
 [tool.poetry.group.test.dependencies]
 pytest = "^8.3.4"
