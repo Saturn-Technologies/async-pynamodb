@@ -67,5 +67,28 @@ jobs:
       run: poetry install -n --all-extras --with test --with dev
     - name: Run mypy
       run: poetry run mypy --config-file mypy.ini pynamodb
+
+  flake8:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.11
+    - name: Install poetry
+      uses: abatilo/actions-poetry@v4
+    - name: Setup a local virtual environment (if no poetry.toml file)
+      run: |
+        poetry config virtualenvs.create true --local
+        poetry config virtualenvs.in-project true --local
+    - uses: actions/cache@v3
+      name: Define a cache for the virtual environment based on the dependencies lock file
+      with:
+        path: ./.venv
+        key: venv-${{ hashFiles('poetry.lock') }}
+    - name: Install the project dependencies
+      run: poetry install -n --all-extras --with test --with dev
     - name: Run flake8 async rules
       run: poetry run flake8 --select=ASYNC pynamodb
