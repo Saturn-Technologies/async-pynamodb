@@ -20,7 +20,7 @@ class BatchGetIterator(typing.AsyncIterator[_T]):
         self.unprocessed_batch_items = list(keys)
         self.consistent_read = consistent_read
         self.attributes_to_get = attributes_to_get
-        self.current_batch: List[Dict[str, Any]] = []
+        self.current_batch: list[dict[str, Any]] = []
 
     def __aiter__(self):
         return self

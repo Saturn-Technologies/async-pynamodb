@@ -94,11 +94,11 @@ except ImportError:
 
 
 class AsyncPynamoDBContext(AbstractAsyncContextManager):
-    CLEANUP_TIMEOUT = 10
 
-    def __init__(self):
+    def __init__(self, cleanup_timeout: int = 10):
         self._context_token = None
         self._client_token = None
+        self._cleanup_timeout = cleanup_timeout
 
     async def __aenter__(self):
         stack, token = await create_stack()
@@ -108,7 +108,7 @@ class AsyncPynamoDBContext(AbstractAsyncContextManager):
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         stack = get_stack()
-        with anyio.fail_after(self.CLEANUP_TIMEOUT, shield=True):
+        with anyio.fail_after(self._cleanup_timeout, shield=True):
             if not stack:
                 return await asyncio.sleep(0)
             await stack.__aexit__(exc_type, exc_val, exc_tb)
