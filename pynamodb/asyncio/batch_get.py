@@ -1,6 +1,7 @@
+import asyncio
 import typing
 
-from typing import List, Dict, Any, TypeVar, Coroutine
+from typing import List, Dict, Any, TypeVar
 
 from aioitertools.asyncio import as_completed
 from more_itertools import chunked
@@ -14,7 +15,7 @@ _T = TypeVar("_T", bound="Model")
 
 class BatchGetIterator(typing.AsyncIterator[_T]):
 
-    def __init__(self, model_cls: _T, keys: typing.Iterable, consistent_read: bool | None = None, attributes_to_get: list | None = None):
+    def __init__(self, model_cls: typing.Type[_T], keys: typing.Iterable, consistent_read: bool | None = None, attributes_to_get: typing.Sequence[str] | None = None):
         self.model_cls = model_cls
         self.unprocessed_batch_items = list(keys)
         self.consistent_read = consistent_read
@@ -42,6 +43,7 @@ class BatchGetIterator(typing.AsyncIterator[_T]):
         # First check if we have items awaiting to be processed
         if self.current_batch:
             item = self.current_batch.pop(0)
+            await asyncio.sleep(0)
             return self.model_cls.from_raw_data(item)
 
         # Check if we have unprocessed items
