@@ -1,4 +1,5 @@
 import abc
+import uuid
 from abc import abstractmethod
 from threading import local
 from typing import Any, Dict, Mapping, Optional, Sequence
@@ -61,6 +62,7 @@ class AbstractConnection(abc.ABC, typing.Generic[T_BotoSession]):
         aws_secret_access_key: Optional[str] = None,
         aws_session_token: Optional[str] = None,
     ):
+        self._id = str(uuid.uuid4())
         self._tables: Dict[str, "MetaTable"] = {}
         self.host = host
         self._local = local()

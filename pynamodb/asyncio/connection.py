@@ -1,20 +1,22 @@
-import contextlib
 import logging
 import threading
 import typing
 from contextlib import AbstractAsyncContextManager
-from contextvars import ContextVar
+from contextvars import Token
 
 import aioboto3
 import asyncio
+
+import anyio
 import types_aiobotocore_dynamodb
 from aiobotocore.config import AioConfig
 from botocore.exceptions import ClientError, BotoCoreError
 
+from pynamodb.asyncio.context.clients import get_or_create_client, create_client_stack, reset_client_stack
+from pynamodb.asyncio.context.stack import create_stack, get_stack, reset_stack
 from pynamodb.connection.abstracts import AbstractConnection
 from pynamodb.connection.base import BOTOCORE_EXCEPTIONS, MetaTable
 from pynamodb.constants import (
-    SERVICE_NAME,
     DELETE_ITEM,
     UPDATE_ITEM,
     ITEM,
@@ -81,10 +83,6 @@ from pynamodb.expressions.update import Action
 
 thread_local = threading.local()
 
-ClientContext: ContextVar[contextlib.AsyncExitStack | None] = ContextVar(
-    "ClientContext", default=None
-)
-
 log = logging.getLogger(__name__)
 log.addHandler(logging.NullHandler())
 
@@ -97,30 +95,31 @@ except ImportError:
 
 
 class AsyncPynamoDBContext(AbstractAsyncContextManager):
-    def __init__(self):
-        current_ctx = ClientContext.get()
-        if current_ctx is not None:
-            raise RuntimeError(
-                "You're already inside an async context. Only a single `AsyncPynamoDB` context is allowed."
-            )
+    _context_token: Token[typing.Any] | None
+    _client_token: Token[typing.Any] | None
+    _cleanup_timeout: int
 
-        stack = contextlib.AsyncExitStack()
-        self._token = ClientContext.set(stack)
+    def __init__(self, cleanup_timeout: int = 10):
+        self._context_token = None
+        self._client_token = None
+        self._cleanup_timeout = cleanup_timeout
 
-    def __aenter__(self):
-        stack = ClientContext.get()
-        if not stack:
-            raise RuntimeError(
-                "You're not inside an async context. You must use `AsyncPynamoDB` to create a connection."
-            )
-        return stack.__aenter__()
+    async def __aenter__(self):
+        stack, token = await create_stack()
+        self._client_token = await create_client_stack()
+        self._context_token = token
+        return await stack.__aenter__()
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        stack = ClientContext.get()
-        if not stack:
-            return
-        await stack.__aexit__(exc_type, exc_val, exc_tb)
-        ClientContext.reset(self._token)
+        stack = get_stack()
+        with anyio.fail_after(self._cleanup_timeout, shield=True):
+            if not stack:
+                return await asyncio.sleep(0)
+            await stack.__aexit__(exc_type, exc_val, exc_tb)
+            if self._context_token:
+                await reset_stack(self._context_token)
+            if self._client_token:
+                await reset_client_stack(self._client_token)
 
 
 class AsyncConnection(AbstractConnection[aioboto3.Session]):
@@ -200,30 +199,17 @@ class AsyncConnection(AbstractConnection[aioboto3.Session]):
         return data
 
     async def get_client(self) -> types_aiobotocore_dynamodb.DynamoDBClient:
-        if not self._client or (
-            self._client._request_signer
-            and not self._client._request_signer._credentials
-        ):
-            config = AioConfig(
-                parameter_validation=False,  # Disable unnecessary validation for performance
-                connect_timeout=self._connect_timeout_seconds,
-                read_timeout=self._read_timeout_seconds,
-                max_pool_connections=self._max_pool_connections,
-                retries={
-                    "total_max_attempts": 1 + self._max_retry_attempts_exception,
-                    "mode": "standard",
-                },
-            )
-            stack = ClientContext.get()
-            if stack is None:
-                raise RuntimeError(
-                    "You're not inside an async context. You must use `AsyncPynamoDB` to create a connection."
-                )
-            client = self.session.client(
-                SERVICE_NAME, region_name=self.region, endpoint_url=self.host, config=config
-            ) # type: ignore[call-overload]
-            self._client = await stack.enter_async_context(client)
-        return typing.cast(types_aiobotocore_dynamodb.DynamoDBClient, self._client)
+        config = AioConfig(
+            parameter_validation=False,  # Disable unnecessary validation for performance
+            connect_timeout=self._connect_timeout_seconds,
+            read_timeout=self._read_timeout_seconds,
+            max_pool_connections=self._max_pool_connections,
+            retries={
+                "total_max_attempts": 1 + self._max_retry_attempts_exception,
+                "mode": "standard",
+            },
+        )
+        return await get_or_create_client(session=self.session, connection_id=self._id, region=self.region, host=self.host, config=config)
 
     async def delete_item(
         self,

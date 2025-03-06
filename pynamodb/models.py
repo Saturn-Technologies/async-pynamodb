@@ -5,6 +5,7 @@ import time
 import logging
 import warnings
 import sys
+from contextlib import asynccontextmanager
 from copy import deepcopy
 from inspect import getmembers
 from typing import Any, AsyncIterator
@@ -25,10 +26,12 @@ from typing import cast
 
 import asyncio
 
+import aioitertools
 from aioitertools.asyncio import as_completed
-from more_itertools import ichunked
+from more_itertools import chunked
 
 from pynamodb._schema import ModelSchema
+from pynamodb.asyncio.batch_get import BatchGetIterator
 from pynamodb.asyncio.batch_write import AsyncBatchWrite
 from pynamodb.asyncio.result_iterator import AsyncResultIterator
 from pynamodb.asyncio.table_connection import AsyncTableConnection
@@ -443,12 +446,12 @@ class Model(AttributeContainer, metaclass=MetaModel):
                 yield {hash_key_attribute.attr_name: hash_key_ser}
 
     @classmethod
-    async def async_batch_get(
+    def async_batch_get(
         cls: Type[_T],
         items: Iterable[Union[_KeyType, Iterable[_KeyType]]],
         consistent_read: Optional[bool] = None,
         attributes_to_get: Optional[Sequence[str]] = None,
-    ) -> AsyncIterator[_T]:
+    ) -> BatchGetIterator[_T]:
         """Retrieve multiple items from DynamoDB in batches.
 
         This method handles pagination and retries for unprocessed items automatically.
@@ -470,41 +473,18 @@ class Model(AttributeContainer, metaclass=MetaModel):
             ```python
             # For a table with only hash key
             keys = ["id1", "id2", "id3"]
-            async for item in wrapper.batch_get(keys):
+            async for item in Model.async_batch_get(keys):
                 process_item(item)
 
             # For a table with hash and range key
             keys = [("id1", "sort1"), ("id2", "sort2")]
-            async for item in wrapper.batch_get(keys):
+            async for item in Model.async_batch_get(keys):
                 process_item(item)
             ```
         """
-        unprocessed_batch_items: list[Any] = list(items)
+        # Return the iterator
+        return BatchGetIterator(cls, items, consistent_read, attributes_to_get)
 
-        while unprocessed_batch_items:
-            to_process: List[Dict[str, Any]] = []
-
-            # Create tasks for each chunk of keys
-            tasks = [
-                cls._async_batch_get_item(chunk, consistent_read, attributes_to_get)
-                for chunk in ichunked(
-                    cls._batch_serialize_keys(unprocessed_batch_items),
-                    BATCH_GET_PAGE_LIMIT,
-                )
-            ]
-
-            # Process completed tasks
-            async for items, unprocessed_items in as_completed(tasks):
-                to_process.extend(unprocessed_items or [])
-                for item in items:
-                    if isinstance(item, dict):
-                        yield cls.from_raw_data(item)
-                    else:
-                        raise ValueError("Got an unexpected type when reading the batch.")
-
-            unprocessed_batch_items = to_process
-            # Small delay to prevent tight loops
-            await asyncio.sleep(0)
 
     @classmethod
     def batch_write(cls: Type[_T], auto_commit: bool = True) -> BatchWrite[_T]:

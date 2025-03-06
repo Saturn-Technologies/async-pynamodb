@@ -140,6 +140,7 @@ class AsyncResultIterator(AsyncIterator[_T]):
             self._limit -= 1
         if self._map_fn:
             item = self._map_fn(item)
+        await asyncio.sleep(0)
         return item
 
     async def next(self) -> _T:

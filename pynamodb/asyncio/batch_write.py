@@ -1,6 +1,7 @@
 import typing
 
 import asyncio
+import anyio
 
 from aioitertools.asyncio import as_completed
 from more_itertools.more import ichunked
@@ -31,6 +32,11 @@ class AsyncBatchWrite(typing.Generic[_T], typing.AsyncContextManager["AsyncBatch
     that are executed asynchronously when the context manager exits.
     """
 
+    # Default timeout for cleanup operations: 
+    # - 5 seconds per item (DynamoDB default) * max batch size
+    # - Additional buffer for retries and network latency
+    CLEANUP_TIMEOUT = BATCH_WRITE_PAGE_LIMIT * 5 + 30  # seconds
+
     def __init__(self, model: typing.Type[_T], auto_commit: bool = True):
         self.model = model
         self.max_operations = BATCH_WRITE_PAGE_LIMIT
@@ -56,6 +62,7 @@ class AsyncBatchWrite(typing.Generic[_T], typing.AsyncContextManager["AsyncBatch
             if self.auto_commit:
                 await self.commit()
         self.pending_operations.append({"action": PUT, "item": put_item})
+        await asyncio.sleep(0)
 
     async def delete(self, del_item: _T) -> None:
         """
@@ -75,9 +82,11 @@ class AsyncBatchWrite(typing.Generic[_T], typing.AsyncContextManager["AsyncBatch
             if self.auto_commit:
                 await self.commit()
         self.pending_operations.append({"action": DELETE, "item": del_item})
+        await asyncio.sleep(0)
 
     async def __aenter__(self) -> "AsyncBatchWrite[_T]":
         """Enter the async context manager."""
+        await asyncio.sleep(0)
         return self
 
     async def __aexit__(
@@ -86,8 +95,40 @@ class AsyncBatchWrite(typing.Generic[_T], typing.AsyncContextManager["AsyncBatch
         exc_val: typing.Optional[BaseException],
         exc_tb: typing.Optional[typing.Any],
     ) -> None:
-        """Exit the async context manager and commit pending operations."""
-        await self.commit()
+        """
+        Exit the async context manager and commit pending operations.
+        
+        The cleanup operation is shielded from cancellation and has a timeout to prevent hanging.
+        If the cleanup times out, any remaining operations will be lost.
+        """
+        with anyio.fail_after(self.CLEANUP_TIMEOUT, shield=True):
+            await self.commit()
+
+    def _to_process_tasks(self) -> typing.Iterable[
+            typing.Coroutine[
+                typing.Any,
+                typing.Any,
+                typing.Optional[typing.Dict[str, typing.Any]],
+            ]
+    ]:
+        for chunk in ichunked(self.pending_operations, BATCH_WRITE_PAGE_LIMIT):
+            put_items: typing.List[SerializedItem] = []
+            delete_items: typing.List[SerializedItem] = []
+
+            for item in chunk:
+                if item.get("action") == PUT:
+                    put_items.append(item["item"].serialize())
+                elif item.get("action") == DELETE:
+                    delete_items.append(item["item"]._get_keys())
+                elif PUT_REQUEST in item:
+                    put_items.append(item[PUT_REQUEST]["ITEM"])
+                elif DELETE_REQUEST in item:
+                    delete_items.append(item[DELETE_REQUEST]["KEY"])
+
+            yield self.model._async_get_connection().batch_write_item(
+                put_items=put_items, delete_items=delete_items
+            )
+
 
     async def commit(self) -> None:
         """
@@ -97,45 +138,19 @@ class AsyncBatchWrite(typing.Generic[_T], typing.AsyncContextManager["AsyncBatch
             PutError: If the maximum retry attempts are exceeded
         """
 
-        async def _tasks() -> typing.AsyncIterator[
-            typing.Coroutine[
-                typing.Any,
-                typing.Any,
-                typing.Optional[typing.Dict[str, typing.Any]],
-            ]
-        ]:
-            for chunk in ichunked(self.pending_operations, BATCH_WRITE_PAGE_LIMIT):
-                put_items: typing.List[SerializedItem] = []
-                delete_items: typing.List[SerializedItem] = []
-
-                for item in chunk:
-                    if item.get("action") == PUT:
-                        put_items.append(item["item"].serialize())
-                    elif item.get("action") == DELETE:
-                        delete_items.append(item["item"]._get_keys())
-                    elif PUT_REQUEST in item:
-                        put_items.append(item[PUT_REQUEST]["ITEM"])
-                    elif DELETE_REQUEST in item:
-                        delete_items.append(item[DELETE_REQUEST]["KEY"])
-
-                yield self.model._async_get_connection().batch_write_item(
-                    put_items=put_items, delete_items=delete_items
-                )
-                await asyncio.sleep(0)
-            self.pending_operations = []
-
         retries = 0
-        unprocessed_batch_items = list(self.pending_operations)
-
-        while unprocessed_batch_items and retries < self.model.Meta.max_retry_attempts:
-            async for data in as_completed([i async for i in _tasks()]):
+        while self.pending_operations and retries < self.model.Meta.max_retry_attempts:
+            next_cycle_items = []
+            async for data in as_completed(self._to_process_tasks()):
                 if data is None:
                     continue
                 unprocessed_items = data.get(UNPROCESSED_ITEMS, {}).get(
                     self.model.Meta.table_name, []
                 )
-                self.pending_operations.extend(unprocessed_items)
+                next_cycle_items.extend(unprocessed_items)
+            self.pending_operations = next_cycle_items
             retries += 1
             await asyncio.sleep(0)
         if self.pending_operations:
             raise PutError("Failed to batch write items: max_retry_attempts exceeded")
+        await asyncio.sleep(0)
