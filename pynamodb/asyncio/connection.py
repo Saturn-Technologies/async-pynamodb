@@ -2,6 +2,7 @@ import logging
 import threading
 import typing
 from contextlib import AbstractAsyncContextManager
+from contextvars import Token
 
 import aioboto3
 import asyncio
@@ -94,6 +95,9 @@ except ImportError:
 
 
 class AsyncPynamoDBContext(AbstractAsyncContextManager):
+    _context_token: Token[typing.Any] | None
+    _client_token: Token[typing.Any] | None
+    _cleanup_timeout: int
 
     def __init__(self, cleanup_timeout: int = 10):
         self._context_token = None
