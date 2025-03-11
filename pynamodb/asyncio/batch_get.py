@@ -24,7 +24,7 @@ class BatchGetIterator(typing.AsyncIterator[_T]):
     def __aiter__(self):
         return self
 
-    def _get_coroutines(self, unprocessed_batch_items) -> list[typing.Awaitable]:
+    def _get_coroutines(self, unprocessed_batch_items) -> list[typing.Coroutine[Any, Any, Any]]:
         """Split unprocessed batch items into chunks and create coroutines for each chunk."""
         serialized_keys = list(self.model_cls._batch_serialize_keys(unprocessed_batch_items))
         return [
@@ -49,10 +49,11 @@ class BatchGetIterator(typing.AsyncIterator[_T]):
         if self.unprocessed_batch_items:
             # Process next batch
             self.unprocessed_batch_items = []
-            futures = []
+            futures: list[asyncio.Task] = []
             async with asyncio.TaskGroup() as tg:
                 for coro in self._get_coroutines(self.unprocessed_batch_items):
-                    futures.append(tg.create_task(coro))
+                    future = tg.create_task(coro)
+                    futures.append(future)
                     await asyncio.sleep(0)
             for future in futures:
                 for items, unprocessed_keys in future.result():
