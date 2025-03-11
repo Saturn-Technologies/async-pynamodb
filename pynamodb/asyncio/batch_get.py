@@ -48,13 +48,13 @@ class BatchGetIterator(typing.AsyncIterator[_T]):
         # Check if we have unprocessed items
         if self.unprocessed_batch_items:
             # Process next batch
-            self.unprocessed_batch_items = []
             futures: list[asyncio.Task] = []
             async with asyncio.TaskGroup() as tg:
                 for coro in self._get_coroutines(self.unprocessed_batch_items):
                     future = tg.create_task(coro)
                     futures.append(future)
                     await asyncio.sleep(0)
+            self.unprocessed_batch_items = []
             for future in futures:
                 for items, unprocessed_keys in future.result():
                     # Add unprocessed items back to the queue
