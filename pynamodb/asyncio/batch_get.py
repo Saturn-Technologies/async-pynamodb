@@ -56,13 +56,13 @@ class BatchGetIterator(typing.AsyncIterator[_T]):
                     await asyncio.sleep(0)
             self.unprocessed_batch_items = []
             for future in futures:
-                for items, unprocessed_keys in future.result():
-                    # Add unprocessed items back to the queue
-                    if unprocessed_keys:
-                        self.unprocessed_batch_items.extend(unprocessed_keys)
-                    if items:
-                        self.current_batch.extend(items)
-                    await asyncio.sleep(0)
+                items, unprocessed_keys = future.result()
+                # Add unprocessed items back to the queue
+                if unprocessed_keys:
+                    self.unprocessed_batch_items.extend(unprocessed_keys)
+                if items:
+                    self.current_batch.extend(items)
+                await asyncio.sleep(0)
             if self.current_batch or self.unprocessed_batch_items:
                 return await self.__anext__()
         raise StopAsyncIteration
