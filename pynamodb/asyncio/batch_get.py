@@ -1,9 +1,8 @@
 import asyncio
 import typing
 
-from typing import List, Dict, Any, TypeVar
+from typing import Any, TypeVar
 
-from aioitertools.asyncio import as_completed
 from more_itertools import chunked
 
 from pynamodb.constants import BATCH_GET_PAGE_LIMIT
@@ -25,7 +24,7 @@ class BatchGetIterator(typing.AsyncIterator[_T]):
     def __aiter__(self):
         return self
 
-    def _get_coroutines(self, unprocessed_batch_items) -> list[typing.Awaitable]:
+    def _get_coroutines(self, unprocessed_batch_items) -> list[typing.Coroutine[Any, Any, Any]]:
         """Split unprocessed batch items into chunks and create coroutines for each chunk."""
         serialized_keys = list(self.model_cls._batch_serialize_keys(unprocessed_batch_items))
         return [
@@ -49,14 +48,21 @@ class BatchGetIterator(typing.AsyncIterator[_T]):
         # Check if we have unprocessed items
         if self.unprocessed_batch_items:
             # Process next batch
-            coros = self._get_coroutines(self.unprocessed_batch_items)
             self.unprocessed_batch_items = []
-            async for items, unprocessed_keys in as_completed(coros, timeout=self.timeout):
-                # Add unprocessed items back to the queue
-                if unprocessed_keys:
-                    self.unprocessed_batch_items.extend(unprocessed_keys)
-                if items:
-                    self.current_batch.extend(items)
+            futures: list[asyncio.Task] = []
+            async with asyncio.TaskGroup() as tg:
+                for coro in self._get_coroutines(self.unprocessed_batch_items):
+                    future = tg.create_task(coro)
+                    futures.append(future)
+                    await asyncio.sleep(0)
+            for future in futures:
+                for items, unprocessed_keys in future.result():
+                    # Add unprocessed items back to the queue
+                    if unprocessed_keys:
+                        self.unprocessed_batch_items.extend(unprocessed_keys)
+                    if items:
+                        self.current_batch.extend(items)
+                    await asyncio.sleep(0)
             if self.current_batch or self.unprocessed_batch_items:
                 return await self.__anext__()
         raise StopAsyncIteration
