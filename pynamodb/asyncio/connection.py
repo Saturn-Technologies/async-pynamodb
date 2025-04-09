@@ -105,21 +105,23 @@ class AsyncPynamoDBContext(AbstractAsyncContextManager):
         self._cleanup_timeout = cleanup_timeout
 
     async def __aenter__(self):
-        stack, token = await create_stack()
-        self._client_token = await create_client_stack()
+        stack, token = create_stack(fail_if_exists=True)
+        self._client_token = create_client_stack()
         self._context_token = token
-        return await stack.__aenter__()
+        await stack.__aenter__()
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         stack = get_stack()
         with anyio.fail_after(self._cleanup_timeout, shield=True):
             if not stack:
-                return await asyncio.sleep(0)
-            await stack.__aexit__(exc_type, exc_val, exc_tb)
+                await asyncio.sleep(0)
+                return
+            else:
+                await stack.__aexit__(exc_type, exc_val, exc_tb)
             if self._context_token:
-                await reset_stack(self._context_token)
+                reset_stack(self._context_token)
             if self._client_token:
-                await reset_client_stack(self._client_token)
+                reset_client_stack(self._client_token)
 
 
 class AsyncConnection(AbstractConnection[aioboto3.Session]):
