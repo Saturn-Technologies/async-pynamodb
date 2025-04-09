@@ -30,6 +30,7 @@ async def _create_client(
         raise RuntimeError("Can't create a client outside an async context")
     # Check if the client is already in the stack
     if connection_id in clients:
+        await asyncio.sleep(0)
         return clients[connection_id]
 
     # Create the client
@@ -56,6 +57,7 @@ async def get_or_create_client(
 ) -> types_aiobotocore_dynamodb.DynamoDBClient:
     client = _get_client(connection_id)
     if client is not None:
+        await asyncio.sleep(0)
         return client
     return await _create_client(session, connection_id, region, host, config)
 
