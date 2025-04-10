@@ -119,7 +119,7 @@ async def create_global_client(session: aioboto3.Session, region: str, host: str
             region_name=region,
             endpoint_url=host,
             config=config,
-        ) as client:
+        ) as client: # type: ignore[call-overload]
             token = GlobalPynamoDBClient.set(client)
             yield client
     finally:
