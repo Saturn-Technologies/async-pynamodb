@@ -1,14 +1,14 @@
-from contextvars import ContextVar
-
+from threading import local
 import aioboto3
 import types_aiobotocore_dynamodb
 from aiobotocore.config import AioConfig
+from contextlib import asynccontextmanager
 
 from pynamodb.constants import SERVICE_NAME
 from pynamodb.settings import get_settings_value
-from contextlib import asynccontextmanager
 
-GlobalPynamoDBClient = ContextVar[types_aiobotocore_dynamodb.DynamoDBClient | None]("GlobalClient", default=None)
+# Replace ContextVar with threading.local
+_thread_local = local()
 
 @asynccontextmanager
 async def create_global_client(session: aioboto3.Session, region: str, host: str | None = None, connection_timeout_seconds: int | None = None, read_timeout_seconds: int | None = None, max_pool_connections: int | None = None, max_retry_attempts: int | None = None):
@@ -112,16 +112,19 @@ async def create_global_client(session: aioboto3.Session, region: str, host: str
             "mode": "standard",
         },
     )
-    token = None
     try:
         async with session.client(
-            SERVICE_NAME,
-            region_name=region,
-            endpoint_url=host,
-            config=config,
-        ) as client: # type: ignore[call-overload]
-            token = GlobalPynamoDBClient.set(client)
+                SERVICE_NAME,
+                region_name=region,
+                endpoint_url=host,
+                config=config,
+        ) as client:  # type: ignore[call-overload]
+            _thread_local.client = client
             yield client
     finally:
-        if token is not None:
-            GlobalPynamoDBClient.reset(token)
+        _thread_local.client = None
+
+# Add a helper function to get the current client
+def get_global_client() -> types_aiobotocore_dynamodb.DynamoDBClient | None:
+    """Returns the current global client or None if not set."""
+    return getattr(_thread_local, 'client', None)

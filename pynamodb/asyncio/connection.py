@@ -14,7 +14,7 @@ from botocore.exceptions import ClientError, BotoCoreError
 
 from pynamodb.asyncio.context.clients import get_or_create_client, create_client_stack, reset_client_stack
 from pynamodb.asyncio.context.stack import create_stack, get_stack, reset_stack
-from pynamodb.asyncio.context.globals import GlobalPynamoDBClient
+from pynamodb.asyncio.context.globals import get_global_client
 from pynamodb.connection.abstracts import AbstractConnection
 from pynamodb.connection.base import BOTOCORE_EXCEPTIONS, MetaTable
 from pynamodb.constants import (
@@ -106,7 +106,7 @@ class AsyncPynamoDBContext(AbstractAsyncContextManager):
         self._cleanup_timeout = cleanup_timeout
 
     async def __aenter__(self):
-        if GlobalPynamoDBClient.get():
+        if get_global_client():
             await asyncio.sleep(0)
             return
         stack, token = create_stack(fail_if_exists=True)
@@ -205,7 +205,7 @@ class AsyncConnection(AbstractConnection[aioboto3.Session]):
         return data
 
     async def get_client(self) -> types_aiobotocore_dynamodb.DynamoDBClient:
-        global_client = GlobalPynamoDBClient.get()
+        global_client = get_global_client()
         if global_client is not None:
             await asyncio.sleep(0)
             return global_client
