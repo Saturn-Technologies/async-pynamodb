@@ -18,7 +18,7 @@ aiohttp = {version = "3.9.5", optional = true}
 
 [tool.poetry.extras]
 signals = ["blinker"]
-asyncio = ["asyncio", "aioboto3", "aioitertools", "types-aioboto3", "anyio"]
+asyncio = ["asyncio", "aioboto3", "aioitertools", "types-aioboto3", "anyio", "aiohttp"]
 
 [tool.poetry.group.test.dependencies]
 pytest = "^8.3.4"

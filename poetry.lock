@@ -2398,10 +2398,10 @@ test = ["big-O", "importlib-resources", "jaraco.functools", "jaraco.itertools", 
 type = ["pytest-mypy"]
 
 [extras]
-asyncio = ["aioboto3", "aioitertools", "anyio", "types-aioboto3"]
+asyncio = ["aioboto3", "aiohttp", "aioitertools", "anyio", "types-aioboto3"]
 signals = ["blinker"]
 
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.11,<3.14"
-content-hash = "d7531a7efb93c3500df61eecc573dbf502d06cbe06686f4033cbc3b9d139e798"
+content-hash = "167d8b527421499fb35900ce26077a54461a1227b295a75deef79b92ef3a0e10"
