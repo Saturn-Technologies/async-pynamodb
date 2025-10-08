@@ -601,6 +601,14 @@ class DiscriminatorAttribute(Attribute[type]):
         return self._discriminator_map[value]
 
 
+class DiscriminatorRangeKeyAttribute(DiscriminatorAttribute):
+
+    def __init__(self, attr_name: Optional[str] = None) -> None:
+        Attribute.__init__(self, attr_name=attr_name, range_key=True)
+        self._class_map: Dict[type, Any] = {}
+        self._discriminator_map: Dict[Any, type] = {}
+
+
 class BinaryAttribute(Attribute[bytes]):
     """
     An attribute containing a binary data object (:code:`bytes`).

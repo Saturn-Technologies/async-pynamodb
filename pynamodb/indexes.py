@@ -137,6 +137,25 @@ class Index(Generic[_M]):
             if attr_cls.is_hash_key:
                 return attr_cls
 
+    @classmethod
+    def _composite_key_attributes(cls):
+        """
+        Returns the attribute classes for the hash key and range key
+        """
+        hash_key_attribute = None
+        range_key_attribute = None
+
+        for attr_cls in cls.Meta.attributes.values():
+            if attr_cls.is_hash_key:
+                hash_key_attribute = attr_cls
+            elif attr_cls.is_range_key:
+                range_key_attribute = attr_cls
+
+            if hash_key_attribute is not None and range_key_attribute is not None:
+                break
+
+        return hash_key_attribute, range_key_attribute
+
     def _update_model_schema(self, schema: ModelSchema) -> None:
         raise NotImplementedError
 

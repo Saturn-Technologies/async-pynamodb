@@ -46,7 +46,7 @@ from pynamodb.expressions.update import Action
 from pynamodb.exceptions import DoesNotExist, TableDoesNotExist, TableError, InvalidStateError, PutError, \
     AttributeNullError
 from pynamodb.attributes import (
-    AttributeContainer, AttributeContainerMeta, TTLAttribute, VersionAttribute
+    AttributeContainer, AttributeContainerMeta, TTLAttribute, VersionAttribute, DiscriminatorRangeKeyAttribute
 )
 from pynamodb.connection.table import TableConnection
 from pynamodb.expressions.condition import Condition
@@ -922,14 +922,24 @@ class Model(AttributeContainer, metaclass=MetaModel):
         :param rate_limit: If set then consumed capacity will be limited to this amount per second
         """
         if index_name:
-            hash_key = cls._indexes[index_name]._hash_key_attribute().serialize(hash_key)
+            hash_key_attr, range_key_attr = cls._indexes[index_name]._composite_key_attributes()
+            hash_key = hash_key_attr.serialize(hash_key)
         else:
+            range_key_attr = cls._range_key_attribute()
             hash_key = cls._serialize_keys(hash_key)[0]
 
-        # If this class has a discriminator attribute, filter the query to only return instances of this class.
+        is_discriminator_range_key = isinstance(range_key_attr, DiscriminatorRangeKeyAttribute)
         discriminator_attr = cls._get_discriminator_attribute()
-        if discriminator_attr:
-            filter_condition &= discriminator_attr.is_in(*discriminator_attr.get_registered_subclasses(cls))
+        subclasses = discriminator_attr.get_registered_subclasses(cls)
+        # Filter the query to only return instances of this class
+        # if the discriminator is not being used as the range key.
+        if discriminator_attr and not (range_key_attr and is_discriminator_range_key):
+            filter_condition &= discriminator_attr.is_in(*subclasses)
+
+        # If the class is a concrete class and the discriminator is used as the range key
+        # default to using the class as the range key.
+        if range_key_condition is None and is_discriminator_range_key and len(subclasses) == 1:
+            range_key_condition &= range_key_attr == subclasses[0]
 
         if page_size is None:
             page_size = limit
@@ -987,14 +997,24 @@ class Model(AttributeContainer, metaclass=MetaModel):
         :param rate_limit: If set then consumed capacity will be limited to this amount per second
         """
         if index_name:
-            hash_key = cls._indexes[index_name]._hash_key_attribute().serialize(hash_key)
+            hash_key_attr, range_key_attr = cls._indexes[index_name]._composite_key_attributes()
+            hash_key = hash_key_attr.serialize(hash_key)
         else:
+            range_key_attr = cls._range_key_attribute()
             hash_key = cls._serialize_keys(hash_key)[0]
 
-        # If this class has a discriminator attribute, filter the query to only return instances of this class.
+        is_discriminator_range_key = isinstance(range_key_attr, DiscriminatorRangeKeyAttribute)
         discriminator_attr = cls._get_discriminator_attribute()
-        if discriminator_attr:
-            filter_condition &= discriminator_attr.is_in(*discriminator_attr.get_registered_subclasses(cls))
+        subclasses = discriminator_attr.get_registered_subclasses(cls)
+        # Filter the query to only return instances of this class
+        # if the discriminator is not being used as the range key.
+        if discriminator_attr and not (range_key_attr and is_discriminator_range_key):
+            filter_condition &= discriminator_attr.is_in(*subclasses)
+
+        # If the class is a child class and the discriminator is used as the range key
+        # default to using the child class as the range key.
+        if range_key_condition is None and is_discriminator_range_key and len(subclasses) == 1:
+            range_key_condition &= range_key_attr == subclasses[0]
 
         if page_size is None:
             page_size = limit
