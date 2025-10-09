@@ -3,7 +3,7 @@ import uuid
 import pytest
 from unittest.mock import patch
 
-from pynamodb.attributes import DiscriminatorRangeKeyAttribute, UnicodeAttribute, DiscriminatorAttribute
+from pynamodb.attributes import UnicodeAttribute, DiscriminatorAttribute
 from pynamodb.expressions.condition import Condition, Comparison
 from pynamodb.exceptions import GetError
 from pynamodb.indexes import AllProjection, GlobalSecondaryIndex
