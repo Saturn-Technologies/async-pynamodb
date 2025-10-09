@@ -163,7 +163,6 @@ class TestPrimaryDiscriminatorRangeKey:
         child_a.save()
         child_b = TestPrimaryDiscriminatorRangeKey.ChildModelB(id=id_)
         child_b.save()
-
         children_a = list(TestPrimaryDiscriminatorRangeKey.ChildModelA.query(
             hash_key=id_
         ))
