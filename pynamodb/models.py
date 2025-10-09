@@ -721,6 +721,13 @@ class Model(AttributeContainer, metaclass=MetaModel):
         :param attributes_to_get:
         :raises ModelInstance.DoesNotExist: if the object to be updated does not exist
         """
+        is_discriminator_range_key = isinstance(cls._range_key_attribute(), DiscriminatorAttribute)
+        discriminator_attr = cls._get_discriminator_attribute()
+        subclasses = discriminator_attr.get_registered_subclasses(cls)
+
+        if range_key is None and is_discriminator_range_key and len(subclasses) == 1:
+            range_key = subclasses[0]
+
         hash_key, range_key = cls._serialize_keys(hash_key, range_key)
 
         data = cls._get_connection().get_item(
@@ -743,6 +750,13 @@ class Model(AttributeContainer, metaclass=MetaModel):
         consistent_read: bool = False,
         attributes_to_get: Optional[Sequence[Text]] = None,
     ) -> _T:
+        is_discriminator_range_key = isinstance(cls._range_key_attribute(), DiscriminatorAttribute)
+        discriminator_attr = cls._get_discriminator_attribute()
+        subclasses = discriminator_attr.get_registered_subclasses(cls)
+
+        if range_key is None and is_discriminator_range_key and len(subclasses) == 1:
+            range_key = subclasses[0]
+
         hash_key, range_key = cls._serialize_keys(hash_key, range_key)
         data = await cls._async_get_connection().get_item(
             hash_key,

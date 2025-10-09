@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from pynamodb.attributes import DiscriminatorRangeKeyAttribute, UnicodeAttribute, DiscriminatorAttribute
 from pynamodb.expressions.condition import Condition, Comparison
+from pynamodb.exceptions import GetError
 from pynamodb.indexes import AllProjection, GlobalSecondaryIndex
 from pynamodb.models import Model
 from pynamodb.pagination import ResultIterator
@@ -210,6 +211,46 @@ class TestPrimaryDiscriminatorRangeKey:
         children_a = list(PrimaryDiscriminatorRangeKeyChildModelA.query(hash_key=id_))
         assert len(children_a) == 1
         assert all(isinstance(child, PrimaryDiscriminatorRangeKeyChildModelA) for child in children_a)
+
+    def test_get_with_parent(self):
+        id_ = str(uuid.uuid4())
+        child_a = PrimaryDiscriminatorRangeKeyChildModelA(id=id_)
+        child_a.save()
+        child_b = PrimaryDiscriminatorRangeKeyChildModelB(id=id_)
+        child_b.save()
+
+        with pytest.raises(GetError):
+            PrimaryDiscriminatorRangeKeyParentModel.get(id_)
+
+    def test_get_explicitly_with_parent(self):
+        id_ = str(uuid.uuid4())
+        child_a = PrimaryDiscriminatorRangeKeyChildModelA(id=id_)
+        child_a.save()
+        child_b = PrimaryDiscriminatorRangeKeyChildModelB(id=id_)
+        child_b.save()
+
+        child_a_result = PrimaryDiscriminatorRangeKeyParentModel.get(
+            hash_key=id_, range_key=PrimaryDiscriminatorRangeKeyChildModelA
+        )
+        assert isinstance(child_a_result, PrimaryDiscriminatorRangeKeyChildModelA)
+
+        child_b_result = PrimaryDiscriminatorRangeKeyParentModel.get(
+            hash_key=id_, range_key=PrimaryDiscriminatorRangeKeyChildModelB
+        )
+        assert isinstance(child_b_result, PrimaryDiscriminatorRangeKeyChildModelB)
+
+    def test_get_with_child(self):
+        id_ = str(uuid.uuid4())
+        child_a = PrimaryDiscriminatorRangeKeyChildModelA(id=id_)
+        child_a.save()
+        child_b = PrimaryDiscriminatorRangeKeyChildModelB(id=id_)
+        child_b.save()
+
+        child_a_result = PrimaryDiscriminatorRangeKeyChildModelA.get(id_)
+        assert isinstance(child_a_result, PrimaryDiscriminatorRangeKeyChildModelA)
+
+        child_b_result = PrimaryDiscriminatorRangeKeyChildModelB.get(id_)
+        assert isinstance(child_b_result, PrimaryDiscriminatorRangeKeyChildModelB)
 
 
 class TestSecondaryDiscriminatorRangeKey:
