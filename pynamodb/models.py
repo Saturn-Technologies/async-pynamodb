@@ -46,7 +46,7 @@ from pynamodb.expressions.update import Action
 from pynamodb.exceptions import DoesNotExist, TableDoesNotExist, TableError, InvalidStateError, PutError, \
     AttributeNullError
 from pynamodb.attributes import (
-    AttributeContainer, AttributeContainerMeta, TTLAttribute, VersionAttribute, DiscriminatorRangeKeyAttribute
+    AttributeContainer, AttributeContainerMeta, TTLAttribute, VersionAttribute, DiscriminatorAttribute
 )
 from pynamodb.connection.table import TableConnection
 from pynamodb.expressions.condition import Condition
@@ -928,8 +928,20 @@ class Model(AttributeContainer, metaclass=MetaModel):
             range_key_attr = cls._range_key_attribute()
             hash_key = cls._serialize_keys(hash_key)[0]
 
-        is_discriminator_range_key = isinstance(range_key_attr, DiscriminatorRangeKeyAttribute)
+        is_discriminator_range_key = isinstance(range_key_attr, DiscriminatorAttribute)
         discriminator_attr = cls._get_discriminator_attribute()
+
+        if index_name and is_discriminator_range_key:
+            # In theory, the discriminator should be the same whether it is on the Model or the Index,
+            # but in practice, this is not true.
+            # Models and Indexes book keep their attributes differently
+            # and due to the limitations of how Indexes originally book keep their attributes,
+            # it is not possible to derive the polymorphic mapping of a discriminator from an Index
+            # (without changing its internal structure quite a bit).
+            # Hence, if an Index is using a discriminator as the range key,
+            # the polymorphic mapping must be taken from the Model.
+            range_key_attr = discriminator_attr
+
         subclasses = discriminator_attr.get_registered_subclasses(cls)
         # Filter the query to only return instances of this class
         # if the discriminator is not being used as the range key.
@@ -1003,7 +1015,7 @@ class Model(AttributeContainer, metaclass=MetaModel):
             range_key_attr = cls._range_key_attribute()
             hash_key = cls._serialize_keys(hash_key)[0]
 
-        is_discriminator_range_key = isinstance(range_key_attr, DiscriminatorRangeKeyAttribute)
+        is_discriminator_range_key = isinstance(range_key_attr, DiscriminatorAttribute)
         discriminator_attr = cls._get_discriminator_attribute()
         subclasses = discriminator_attr.get_registered_subclasses(cls)
         # Filter the query to only return instances of this class
