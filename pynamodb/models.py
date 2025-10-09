@@ -897,7 +897,7 @@ class Model(AttributeContainer, metaclass=MetaModel):
         range_key_condition: Optional[Condition] = None,
         filter_condition: Optional[Condition] = None,
         index_name: Optional[str] = None
-    ) -> None:
+    ) -> tuple[Optional[Condition], Optional[Condition]]:
         if index_name:
             hash_key_attr, range_key_attr = cls._indexes[index_name]._composite_key_attributes()
             hash_key = hash_key_attr.serialize(hash_key)
@@ -930,6 +930,8 @@ class Model(AttributeContainer, metaclass=MetaModel):
         if range_key_condition is None and is_discriminator_range_key and len(subclasses) == 1:
             range_key_condition &= range_key_attr == subclasses[0]
 
+        return range_key_condition, filter_condition
+
     @classmethod
     def query(
         cls: Type[_T],
@@ -961,7 +963,7 @@ class Model(AttributeContainer, metaclass=MetaModel):
         :param page_size: Page size of the query to DynamoDB
         :param rate_limit: If set then consumed capacity will be limited to this amount per second
         """
-        cls._parse_range_key_and_filter_conditions(
+        range_key_condition, filter_condition = cls._parse_range_key_and_filter_conditions(
             hash_key=hash_key,
             range_key_condition=range_key_condition,
             filter_condition=filter_condition,
@@ -1023,7 +1025,7 @@ class Model(AttributeContainer, metaclass=MetaModel):
         :param page_size: Page size of the query to DynamoDB
         :param rate_limit: If set then consumed capacity will be limited to this amount per second
         """
-        cls._parse_range_key_and_filter_conditions(
+        range_key_condition, filter_condition = cls._parse_range_key_and_filter_conditions(
             hash_key=hash_key,
             range_key_condition=range_key_condition,
             filter_condition=filter_condition,
