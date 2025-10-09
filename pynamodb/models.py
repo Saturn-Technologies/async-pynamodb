@@ -723,7 +723,7 @@ class Model(AttributeContainer, metaclass=MetaModel):
         """
         is_discriminator_range_key = isinstance(cls._range_key_attribute(), DiscriminatorAttribute)
         discriminator_attr = cls._get_discriminator_attribute()
-        subclasses = discriminator_attr.get_registered_subclasses(cls)
+        subclasses = discriminator_attr.get_registered_subclasses(cls) if discriminator_attr else []
 
         if range_key is None and is_discriminator_range_key and len(subclasses) == 1:
             range_key = subclasses[0]
@@ -752,7 +752,7 @@ class Model(AttributeContainer, metaclass=MetaModel):
     ) -> _T:
         is_discriminator_range_key = isinstance(cls._range_key_attribute(), DiscriminatorAttribute)
         discriminator_attr = cls._get_discriminator_attribute()
-        subclasses = discriminator_attr.get_registered_subclasses(cls)
+        subclasses = discriminator_attr.get_registered_subclasses(cls) if discriminator_attr else []
 
         if range_key is None and is_discriminator_range_key and len(subclasses) == 1:
             range_key = subclasses[0]
@@ -933,7 +933,7 @@ class Model(AttributeContainer, metaclass=MetaModel):
             # the polymorphic mapping must be taken from the Model.
             range_key_attr = discriminator_attr
 
-        subclasses = discriminator_attr.get_registered_subclasses(cls)
+        subclasses = discriminator_attr.get_registered_subclasses(cls) if discriminator_attr else []
         # Filter the query to only return instances of this class
         # if the discriminator is not being used as the range key.
         if discriminator_attr and not (range_key_attr and is_discriminator_range_key):
