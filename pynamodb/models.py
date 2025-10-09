@@ -891,36 +891,13 @@ class Model(AttributeContainer, metaclass=MetaModel):
         return result_iterator.total_count
 
     @classmethod
-    def query(
+    def _parse_range_key_and_filter_conditions(
         cls: Type[_T],
         hash_key: _KeyType,
         range_key_condition: Optional[Condition] = None,
         filter_condition: Optional[Condition] = None,
-        consistent_read: bool = False,
-        index_name: Optional[str] = None,
-        scan_index_forward: Optional[bool] = None,
-        limit: Optional[int] = None,
-        last_evaluated_key: Optional[Dict[str, Dict[str, Any]]] = None,
-        attributes_to_get: Optional[Iterable[str]] = None,
-        page_size: Optional[int] = None,
-        rate_limit: Optional[float] = None,
-    ) -> ResultIterator[_T]:
-        """
-        Provides a high level query API
-
-        :param hash_key: The hash key to query
-        :param range_key_condition: Condition for range key
-        :param filter_condition: Condition used to restrict the query results
-        :param consistent_read: If True, a consistent read is performed
-        :param index_name: If set, then this index is used
-        :param limit: Used to limit the number of results returned
-        :param scan_index_forward: If set, then used to specify the same parameter to the DynamoDB API.
-            Controls descending or ascending results
-        :param last_evaluated_key: If set, provides the starting point for query.
-        :param attributes_to_get: If set, only returns these elements
-        :param page_size: Page size of the query to DynamoDB
-        :param rate_limit: If set then consumed capacity will be limited to this amount per second
-        """
+        index_name: Optional[str] = None
+    ) -> None:
         if index_name:
             hash_key_attr, range_key_attr = cls._indexes[index_name]._composite_key_attributes()
             hash_key = hash_key_attr.serialize(hash_key)
@@ -952,6 +929,44 @@ class Model(AttributeContainer, metaclass=MetaModel):
         # default to using the class as the range key.
         if range_key_condition is None and is_discriminator_range_key and len(subclasses) == 1:
             range_key_condition &= range_key_attr == subclasses[0]
+
+    @classmethod
+    def query(
+        cls: Type[_T],
+        hash_key: _KeyType,
+        range_key_condition: Optional[Condition] = None,
+        filter_condition: Optional[Condition] = None,
+        consistent_read: bool = False,
+        index_name: Optional[str] = None,
+        scan_index_forward: Optional[bool] = None,
+        limit: Optional[int] = None,
+        last_evaluated_key: Optional[Dict[str, Dict[str, Any]]] = None,
+        attributes_to_get: Optional[Iterable[str]] = None,
+        page_size: Optional[int] = None,
+        rate_limit: Optional[float] = None,
+    ) -> ResultIterator[_T]:
+        """
+        Provides a high level query API
+
+        :param hash_key: The hash key to query
+        :param range_key_condition: Condition for range key
+        :param filter_condition: Condition used to restrict the query results
+        :param consistent_read: If True, a consistent read is performed
+        :param index_name: If set, then this index is used
+        :param limit: Used to limit the number of results returned
+        :param scan_index_forward: If set, then used to specify the same parameter to the DynamoDB API.
+            Controls descending or ascending results
+        :param last_evaluated_key: If set, provides the starting point for query.
+        :param attributes_to_get: If set, only returns these elements
+        :param page_size: Page size of the query to DynamoDB
+        :param rate_limit: If set then consumed capacity will be limited to this amount per second
+        """
+        cls._parse_range_key_and_filter_conditions(
+            hash_key=hash_key,
+            range_key_condition=range_key_condition,
+            filter_condition=filter_condition,
+            index_name=index_name,
+        )
 
         if page_size is None:
             page_size = limit
@@ -1008,25 +1023,12 @@ class Model(AttributeContainer, metaclass=MetaModel):
         :param page_size: Page size of the query to DynamoDB
         :param rate_limit: If set then consumed capacity will be limited to this amount per second
         """
-        if index_name:
-            hash_key_attr, range_key_attr = cls._indexes[index_name]._composite_key_attributes()
-            hash_key = hash_key_attr.serialize(hash_key)
-        else:
-            range_key_attr = cls._range_key_attribute()
-            hash_key = cls._serialize_keys(hash_key)[0]
-
-        is_discriminator_range_key = isinstance(range_key_attr, DiscriminatorAttribute)
-        discriminator_attr = cls._get_discriminator_attribute()
-        subclasses = discriminator_attr.get_registered_subclasses(cls)
-        # Filter the query to only return instances of this class
-        # if the discriminator is not being used as the range key.
-        if discriminator_attr and not (range_key_attr and is_discriminator_range_key):
-            filter_condition &= discriminator_attr.is_in(*subclasses)
-
-        # If the class is a child class and the discriminator is used as the range key
-        # default to using the child class as the range key.
-        if range_key_condition is None and is_discriminator_range_key and len(subclasses) == 1:
-            range_key_condition &= range_key_attr == subclasses[0]
+        cls._parse_range_key_and_filter_conditions(
+            hash_key=hash_key,
+            range_key_condition=range_key_condition,
+            filter_condition=filter_condition,
+            index_name=index_name,
+        )
 
         if page_size is None:
             page_size = limit
