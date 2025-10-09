@@ -907,17 +907,14 @@ class Model(AttributeContainer, metaclass=MetaModel):
     @classmethod
     def _parse_range_key_and_filter_conditions(
         cls: Type[_T],
-        hash_key: _KeyType,
         range_key_condition: Optional[Condition] = None,
         filter_condition: Optional[Condition] = None,
         index_name: Optional[str] = None
     ) -> tuple[Optional[Condition], Optional[Condition]]:
         if index_name:
-            hash_key_attr, range_key_attr = cls._indexes[index_name]._composite_key_attributes()
-            hash_key = hash_key_attr.serialize(hash_key)
+            range_key_attr = cls._indexes[index_name]._range_key_attribute()
         else:
             range_key_attr = cls._range_key_attribute()
-            hash_key = cls._serialize_keys(hash_key)[0]
 
         is_discriminator_range_key = isinstance(range_key_attr, DiscriminatorAttribute)
         discriminator_attr = cls._get_discriminator_attribute()
@@ -978,11 +975,16 @@ class Model(AttributeContainer, metaclass=MetaModel):
         :param rate_limit: If set then consumed capacity will be limited to this amount per second
         """
         range_key_condition, filter_condition = cls._parse_range_key_and_filter_conditions(
-            hash_key=hash_key,
             range_key_condition=range_key_condition,
             filter_condition=filter_condition,
             index_name=index_name,
         )
+
+        if index_name:
+            hash_key_attr = cls._indexes[index_name]._hash_key_attribute()
+            hash_key = hash_key_attr.serialize(hash_key)
+        else:
+            hash_key = cls._serialize_keys(hash_key)[0]
 
         if page_size is None:
             page_size = limit
@@ -1040,11 +1042,16 @@ class Model(AttributeContainer, metaclass=MetaModel):
         :param rate_limit: If set then consumed capacity will be limited to this amount per second
         """
         range_key_condition, filter_condition = cls._parse_range_key_and_filter_conditions(
-            hash_key=hash_key,
             range_key_condition=range_key_condition,
             filter_condition=filter_condition,
             index_name=index_name,
         )
+
+        if index_name:
+            hash_key_attr = cls._indexes[index_name]._hash_key_attribute()
+            hash_key = hash_key_attr.serialize(hash_key)
+        else:
+            hash_key = cls._serialize_keys(hash_key)[0]
 
         if page_size is None:
             page_size = limit
