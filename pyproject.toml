@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pynamodb"
-version = "6.0.3"
+version = "6.1.0"
 description = "A Pythonic interface for Amazon's DynamoDB with AsyncIO Support"
 authors = ["Jharrod LaFon <jlafon@eyesopen.com>", "Guilherme Scaranse <guiscaranse@gmail.com>"]
 license = "MIT"

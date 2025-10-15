@@ -558,8 +558,8 @@ class AttributeContainer(metaclass=AttributeContainerMeta):
 class DiscriminatorAttribute(Attribute[type]):
     attr_type = STRING
 
-    def __init__(self, attr_name: Optional[str] = None) -> None:
-        super().__init__(attr_name=attr_name)
+    def __init__(self, attr_name: Optional[str] = None, *, range_key: bool = False) -> None:
+        super().__init__(attr_name=attr_name, range_key=range_key)
         self._class_map: Dict[type, Any] = {}
         self._discriminator_map: Dict[Any, type] = {}
 

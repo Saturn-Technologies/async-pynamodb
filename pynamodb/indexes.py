@@ -137,6 +137,15 @@ class Index(Generic[_M]):
             if attr_cls.is_hash_key:
                 return attr_cls
 
+    @classmethod
+    def _range_key_attribute(cls):
+        """
+        Returns the attribute class for the range key
+        """
+        for attr_cls in cls.Meta.attributes.values():
+            if attr_cls.is_range_key:
+                return attr_cls
+
     def _update_model_schema(self, schema: ModelSchema) -> None:
         raise NotImplementedError
 

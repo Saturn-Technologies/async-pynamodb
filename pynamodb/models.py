@@ -46,7 +46,7 @@ from pynamodb.expressions.update import Action
 from pynamodb.exceptions import DoesNotExist, TableDoesNotExist, TableError, InvalidStateError, PutError, \
     AttributeNullError
 from pynamodb.attributes import (
-    AttributeContainer, AttributeContainerMeta, TTLAttribute, VersionAttribute
+    AttributeContainer, AttributeContainerMeta, TTLAttribute, VersionAttribute, DiscriminatorAttribute
 )
 from pynamodb.connection.table import TableConnection
 from pynamodb.expressions.condition import Condition
@@ -721,6 +721,13 @@ class Model(AttributeContainer, metaclass=MetaModel):
         :param attributes_to_get:
         :raises ModelInstance.DoesNotExist: if the object to be updated does not exist
         """
+        is_discriminator_range_key = isinstance(cls._range_key_attribute(), DiscriminatorAttribute)
+        discriminator_attr = cls._get_discriminator_attribute()
+        subclasses = discriminator_attr.get_registered_subclasses(cls) if discriminator_attr else []
+
+        if range_key is None and is_discriminator_range_key and len(subclasses) == 1:
+            range_key = subclasses[0]
+
         hash_key, range_key = cls._serialize_keys(hash_key, range_key)
 
         data = cls._get_connection().get_item(
@@ -743,6 +750,13 @@ class Model(AttributeContainer, metaclass=MetaModel):
         consistent_read: bool = False,
         attributes_to_get: Optional[Sequence[Text]] = None,
     ) -> _T:
+        is_discriminator_range_key = isinstance(cls._range_key_attribute(), DiscriminatorAttribute)
+        discriminator_attr = cls._get_discriminator_attribute()
+        subclasses = discriminator_attr.get_registered_subclasses(cls) if discriminator_attr else []
+
+        if range_key is None and is_discriminator_range_key and len(subclasses) == 1:
+            range_key = subclasses[0]
+
         hash_key, range_key = cls._serialize_keys(hash_key, range_key)
         data = await cls._async_get_connection().get_item(
             hash_key,
@@ -891,6 +905,45 @@ class Model(AttributeContainer, metaclass=MetaModel):
         return result_iterator.total_count
 
     @classmethod
+    def _parse_range_key_and_filter_conditions(
+        cls: Type[_T],
+        range_key_condition: Optional[Condition] = None,
+        filter_condition: Optional[Condition] = None,
+        index_name: Optional[str] = None
+    ) -> tuple[Optional[Condition], Optional[Condition]]:
+        if index_name:
+            range_key_attr = cls._indexes[index_name]._range_key_attribute()
+        else:
+            range_key_attr = cls._range_key_attribute()
+
+        is_discriminator_range_key = isinstance(range_key_attr, DiscriminatorAttribute)
+        discriminator_attr = cls._get_discriminator_attribute()
+
+        if index_name and is_discriminator_range_key:
+            # In theory, the discriminator should be the same whether it is on the Model or the Index,
+            # but in practice, this is not true.
+            # Models and Indexes book keep their attributes differently
+            # and due to the limitations of how Indexes originally book keep their attributes,
+            # it is not possible to derive the polymorphic mapping of a discriminator from an Index
+            # (without changing its internal structure quite a bit).
+            # Hence, if an Index is using a discriminator as the range key,
+            # the polymorphic mapping must be taken from the Model.
+            range_key_attr = discriminator_attr
+
+        subclasses = discriminator_attr.get_registered_subclasses(cls) if discriminator_attr else []
+        # Filter the query to only return instances of this class
+        # if the discriminator is not being used as the range key.
+        if discriminator_attr and not (range_key_attr and is_discriminator_range_key):
+            filter_condition &= discriminator_attr.is_in(*subclasses)
+
+        # If the class is a concrete class and the discriminator is used as the range key
+        # default to using the class as the range key.
+        if range_key_condition is None and is_discriminator_range_key and len(subclasses) == 1:
+            range_key_condition &= range_key_attr == subclasses[0]
+
+        return range_key_condition, filter_condition
+
+    @classmethod
     def query(
         cls: Type[_T],
         hash_key: _KeyType,
@@ -921,15 +974,17 @@ class Model(AttributeContainer, metaclass=MetaModel):
         :param page_size: Page size of the query to DynamoDB
         :param rate_limit: If set then consumed capacity will be limited to this amount per second
         """
+        range_key_condition, filter_condition = cls._parse_range_key_and_filter_conditions(
+            range_key_condition=range_key_condition,
+            filter_condition=filter_condition,
+            index_name=index_name,
+        )
+
         if index_name:
-            hash_key = cls._indexes[index_name]._hash_key_attribute().serialize(hash_key)
+            hash_key_attr = cls._indexes[index_name]._hash_key_attribute()
+            hash_key = hash_key_attr.serialize(hash_key)
         else:
             hash_key = cls._serialize_keys(hash_key)[0]
-
-        # If this class has a discriminator attribute, filter the query to only return instances of this class.
-        discriminator_attr = cls._get_discriminator_attribute()
-        if discriminator_attr:
-            filter_condition &= discriminator_attr.is_in(*discriminator_attr.get_registered_subclasses(cls))
 
         if page_size is None:
             page_size = limit
@@ -986,15 +1041,17 @@ class Model(AttributeContainer, metaclass=MetaModel):
         :param page_size: Page size of the query to DynamoDB
         :param rate_limit: If set then consumed capacity will be limited to this amount per second
         """
+        range_key_condition, filter_condition = cls._parse_range_key_and_filter_conditions(
+            range_key_condition=range_key_condition,
+            filter_condition=filter_condition,
+            index_name=index_name,
+        )
+
         if index_name:
-            hash_key = cls._indexes[index_name]._hash_key_attribute().serialize(hash_key)
+            hash_key_attr = cls._indexes[index_name]._hash_key_attribute()
+            hash_key = hash_key_attr.serialize(hash_key)
         else:
             hash_key = cls._serialize_keys(hash_key)[0]
-
-        # If this class has a discriminator attribute, filter the query to only return instances of this class.
-        discriminator_attr = cls._get_discriminator_attribute()
-        if discriminator_attr:
-            filter_condition &= discriminator_attr.is_in(*discriminator_attr.get_registered_subclasses(cls))
 
         if page_size is None:
             page_size = limit
