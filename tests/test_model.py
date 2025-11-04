@@ -3266,6 +3266,55 @@ def test_model_version_attribute_save(add_version_condition: bool) -> None:
         assert args == params
 
 
+def test_version_attribute_no_override_if_set() -> None:
+    item = VersionedModel('test_user_name', email='test_user@email.com')
+
+    with patch(PATCH_METHOD) as req:
+        req.return_value = {
+            ATTRIBUTES: {
+                'name': {
+                    'S': 'test_user_name'
+                },
+                'email': {
+                    'S': 'new@email.com'
+                },
+                'version': {
+                    'N': '1'
+                },
+            }
+        }
+        item.update(actions=[
+            VersionedModel.email.set('new@email.com'),
+            VersionedModel.version.set((VersionedModel.version | 0) + 1)
+        ], add_version_condition=False)
+        args = req.call_args[0][1]
+        expected = {
+            'ExpressionAttributeValues': {
+                ':0': {
+                    'S': 'new@email.com'
+                },
+                ':1': {
+                    'N': '0'
+                },
+                ':2': {
+                    'N': '1'
+                }
+            },
+            'Key': {
+                'name': {
+                    'S': 'test_user_name'
+                }
+            },
+            'ReturnConsumedCapacity': 'TOTAL',
+            'ReturnValues': 'ALL_NEW',
+            'TableName': 'VersionedModel',
+            'ExpressionAttributeNames': {'#1': 'version', '#0': 'email'},
+            'UpdateExpression': 'SET #0 = :0, #1 = if_not_exists (#1, :1) + :2',
+        }
+        assert args == expected
+        assert item.version == 1
+
+
 @pytest.mark.parametrize('add_version_condition', [True, False])
 def test_version_attribute_increments_on_update(add_version_condition: bool) -> None:
     item = VersionedModel('test_user_name', email='test_user@email.com')

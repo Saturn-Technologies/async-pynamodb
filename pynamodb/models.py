@@ -1388,19 +1388,24 @@ class Model(AttributeContainer, metaclass=MetaModel):
 
         version_attribute = self.get_attributes()[self._version_attribute_name]
         value = getattr(self, self._version_attribute_name)
+        # only add the version update action if it is not already in the action list
+        add_action = (
+            actions is not None and
+            not any(str(a.values[0]) == self._version_attribute_name for a in actions)
+        )
 
         if value is not None:
             condition = version_attribute == value
             if attributes is not None:
                 attributes[version_attribute.attr_name] = self._serialize_value(version_attribute, value + 1)
-            if actions is not None:
-                actions.append(version_attribute.add(1))
+            if add_action:
+                actions.append(version_attribute.add(1))  # type: ignore
         else:
             condition = version_attribute.does_not_exist()
             if attributes is not None:
                 attributes[version_attribute.attr_name] = self._serialize_value(version_attribute, 1)
-            if actions is not None:
-                actions.append(version_attribute.set(1))
+            if add_action:
+                actions.append(version_attribute.set(1))  # type: ignore
 
         return condition
 
