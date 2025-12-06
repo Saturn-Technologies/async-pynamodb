@@ -1405,7 +1405,7 @@ class Model(AttributeContainer, metaclass=MetaModel):
             if attributes is not None:
                 attributes[version_attribute.attr_name] = self._serialize_value(version_attribute, 1)
             if add_action:
-                actions.append(version_attribute.set(1))  # type: ignore
+                actions.append(version_attribute.set((version_attribute | 0) + 1))  # type: ignore
 
         return condition
 
