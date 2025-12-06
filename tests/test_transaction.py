@@ -112,9 +112,9 @@ class TestTransactWrite:
             'TableName': 'mock',
             'Key': {'mock_hash': {'N': '4'}, 'mock_range': {'N': '6'}},
             'ReturnValuesOnConditionCheckFailure': 'ALL_OLD',
-            'UpdateExpression': 'SET #1 = :0, #0 = :1',
+            'UpdateExpression': 'SET #1 = :0, #0 = if_not_exists (#0, :1) + :2',
             'ExpressionAttributeNames': {'#0': 'mock_version', '#1': 'mock_toot'},
-            'ExpressionAttributeValues': {':0': {'S': 'hello'}, ':1': {'N': '1'}}
+            'ExpressionAttributeValues': {':0': {'S': 'hello'}, ':1': {'N': '0'}, ':2': {'N': '1'}}
         }]
         mock_connection_transact_write.assert_called_once_with(
             condition_check_items=expected_condition_checks,

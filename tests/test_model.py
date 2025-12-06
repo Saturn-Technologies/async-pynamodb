@@ -3341,6 +3341,9 @@ def test_version_attribute_increments_on_update(add_version_condition: bool) -> 
                     'S': 'new@email.com'
                 },
                 ':1': {
+                    'N': '0'
+                },
+                ':2': {
                     'N': '1'
                 }
             },
@@ -3357,12 +3360,12 @@ def test_version_attribute_increments_on_update(add_version_condition: bool) -> 
             expected.update({
                 'ConditionExpression': 'attribute_not_exists (#0)',
                 'ExpressionAttributeNames': {'#0': 'version', '#1': 'email'},
-                'UpdateExpression': 'SET #1 = :0, #0 = :1',
+                'UpdateExpression': 'SET #1 = :0, #0 = if_not_exists (#0, :1) + :2',
             })
         else:
             expected.update({
                 'ExpressionAttributeNames': {'#0': 'email', '#1': 'version'},
-                'UpdateExpression': 'SET #0 = :0, #1 = :1',
+                'UpdateExpression': 'SET #0 = :0, #1 = if_not_exists (#1, :1) + :2',
             })
 
         assert args == expected
