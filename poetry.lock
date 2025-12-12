@@ -2556,4 +2556,4 @@ signals = ["blinker"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.14"
-content-hash = "41296f0d57b2cbc617a2b6a3d9d2b8cb440d05d7d3f5148ac6ec7041590a7eb1"
+content-hash = "4a385f27ec5dd3c4c2c459b38c163fbec2c6932f8c051ee8a97d96fc09634a2b"
