@@ -24,7 +24,7 @@ from pynamodb.exceptions import (
     TableError, DeleteError, PutError, ScanError, GetError, UpdateError, TableDoesNotExist, VerboseClientError)
 from pynamodb.constants import (
     UNPROCESSED_ITEMS, STRING, BINARY, DEFAULT_ENCODING, TABLE_KEY,
-    PAY_PER_REQUEST_BILLING_MODE)
+    PAY_PER_REQUEST_BILLING_MODE, REQUEST_ITEMS)
 from pynamodb.expressions.operand import Path, Value
 from pynamodb.expressions.update import SetAction
 from .data import DESCRIBE_TABLE_DATA, GET_ITEM_DATA, LIST_TABLE_DATA
@@ -1613,7 +1613,16 @@ def test_connection_make_api_call__binary_attributes(send_mock):
 
     send_mock.return_value = resp
 
-    resp = Connection()._make_api_call('BatchWriteItem', {})
+    resp = Connection()._make_api_call(
+        'BatchWriteItem',
+        {
+            REQUEST_ITEMS: {
+                'someTable': [
+                    {'PutRequest': {'Item': {'name': {STRING: 'daniel'}}}}
+                ]
+            }
+        }
+    )
 
     assert resp['UnprocessedItems']['someTable'] == [{
         'PutRequest': {
